@@ -73,3 +73,16 @@ type Message struct {
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type UpdateProfileRequest struct {
+	UserID              string  `json:"user_id"`
+	DisplayName         *string `json:"display_name,omitempty"`
+	AvatarURL           *string `json:"avatar_url,omitempty"`
+	BannerURL           *string `json:"banner_url,omitempty"`
+	Bio                 *string `json:"bio,omitempty"`
+	PortfolioURL        *string `json:"portfolio_url,omitempty"`
+	BirthDate           *string `json:"birth_date,omitempty"`
+	Location            *string `json:"location,omitempty"`
+	FollowersVisibility *string `json:"followers_visibility,omitempty"`
+	FollowingVisibility *string `json:"following_visibility,omitempty"`
+}

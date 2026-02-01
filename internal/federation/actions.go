@@ -9,8 +9,8 @@ import (
 
 func FollowUser(followerID, followeeID string) error {
 	_, err := db.Exec(
-		`INSERT INTO follows (follower_id, followee_id)
-		 VALUES ($1, $2)
+		`INSERT INTO follows (follower_user_id, follower_home_server, followee_user_id, followee_home_server)
+		 VALUES ($1, 'http://localhost:8080', $2, 'http://localhost:8080')
 		 ON CONFLICT DO NOTHING`,
 		followerID, followeeID,
 	)
@@ -219,4 +219,111 @@ func GetIdentityByUserID(userID string) (*Identity, error) {
 	}
 
 	return &i, nil
+}
+
+// UpdateProfile updates profile fields dynamically
+func UpdateProfile(req UpdateProfileRequest) error {
+	query := "UPDATE profiles SET updated_at = NOW()"
+	args := []interface{}{}
+	argCount := 1
+
+	if req.DisplayName != nil {
+		query += fmt.Sprintf(", display_name = $%d", argCount)
+		args = append(args, *req.DisplayName)
+		argCount++
+	}
+	if req.AvatarURL != nil {
+		query += fmt.Sprintf(", avatar_url = $%d", argCount)
+		args = append(args, *req.AvatarURL)
+		argCount++
+	}
+	if req.BannerURL != nil {
+		query += fmt.Sprintf(", banner_url = $%d", argCount)
+		args = append(args, *req.BannerURL)
+		argCount++
+	}
+	if req.Bio != nil {
+		query += fmt.Sprintf(", bio = $%d", argCount)
+		args = append(args, *req.Bio)
+		argCount++
+	}
+	if req.PortfolioURL != nil {
+		query += fmt.Sprintf(", portfolio_url = $%d", argCount)
+		args = append(args, *req.PortfolioURL)
+		argCount++
+	}
+	if req.BirthDate != nil {
+		query += fmt.Sprintf(", birth_date = $%d", argCount)
+		args = append(args, *req.BirthDate)
+		argCount++
+	}
+	if req.Location != nil {
+		query += fmt.Sprintf(", location = $%d", argCount)
+		args = append(args, *req.Location)
+		argCount++
+	}
+	if req.FollowersVisibility != nil {
+		query += fmt.Sprintf(", followers_visibility = $%d", argCount)
+		args = append(args, *req.FollowersVisibility)
+		argCount++
+	}
+	if req.FollowingVisibility != nil {
+		query += fmt.Sprintf(", following_visibility = $%d", argCount)
+		args = append(args, *req.FollowingVisibility)
+		argCount++
+	}
+
+	query += fmt.Sprintf(" WHERE user_id = $%d", argCount)
+	args = append(args, req.UserID)
+
+	_, err := db.Exec(query, args...)
+	return err
+}
+
+// CreatePost inserts a new post into the database
+func CreatePost(userID, content string) (string, error) {
+	var postID string
+	err := db.QueryRow(`
+		INSERT INTO posts (author, content, created_at, updated_at)
+		VALUES ($1, $2, NOW(), NOW())
+		RETURNING id
+	`, userID, content).Scan(&postID)
+
+	if err != nil {
+		return "", err
+	}
+
+	return postID, nil
+}
+
+// GetUserPosts retrieves all posts by a specific user
+func GetUserPosts(userID string) ([]Post, error) {
+	query := `
+		SELECT id, author, content, created_at, updated_at
+		FROM posts
+		WHERE author = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []Post
+	for rows.Next() {
+		var p Post
+		err := rows.Scan(&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return posts, nil
 }

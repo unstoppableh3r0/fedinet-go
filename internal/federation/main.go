@@ -13,6 +13,9 @@ func main() {
 	http.HandleFunc("/user/search", UserSearchHandler)
 	http.HandleFunc("/register", RegisterHandler)
 	http.HandleFunc("/user/me", MeHandler)
+	http.HandleFunc("/profile/update", UpdateProfileHandler)
+	http.HandleFunc("/post/create", CreatePostHandler)
+	http.HandleFunc("/posts/user", GetUserPostsHandler)
 
 	log.Println("Go server running on :8080")
 

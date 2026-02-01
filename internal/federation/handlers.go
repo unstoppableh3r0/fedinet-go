@@ -208,3 +208,92 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(doc)
 }
+
+func UpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" {
+		http.Error(w, "user_id required", http.StatusBadRequest)
+		return
+	}
+
+	if err := UpdateProfile(req); err != nil {
+		log.Println("Profile update failed:", err)
+		http.Error(w, "profile update failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "profile updated successfully",
+	})
+}
+
+func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID  string `json:"user_id"`
+		Content string `json:"content"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.Content == "" {
+		http.Error(w, "user_id and content required", http.StatusBadRequest)
+		return
+	}
+
+	postID, err := CreatePost(req.UserID, req.Content)
+	if err != nil {
+		log.Println("Post creation failed:", err)
+		http.Error(w, "post creation failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"post_id": postID,
+		"message": "post created successfully",
+	})
+}
+
+func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		http.Error(w, "user_id required", http.StatusBadRequest)
+		return
+	}
+
+	posts, err := GetUserPosts(userID)
+	if err != nil {
+		log.Println("Failed to fetch posts:", err)
+		http.Error(w, "failed to fetch posts", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"posts": posts,
+	})
+}

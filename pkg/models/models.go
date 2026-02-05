@@ -1,9 +1,19 @@
-package main
+package models
 
 import (
 	"time"
 
 	"github.com/google/uuid"
+)
+
+// Visibility represents content visibility settings
+type Visibility string
+
+const (
+	VisibilityPublic    Visibility = "public"
+	VisibilityFollowers Visibility = "followers"
+	VisibilityPrivate   Visibility = "private"
+	VisibilityServer    Visibility = "server"
 )
 
 type Identity struct {
@@ -104,3 +114,43 @@ type UpdateProfileRequest struct {
 	FollowersVisibility *string `json:"followers_visibility,omitempty"`
 	FollowingVisibility *string `json:"following_visibility,omitempty"`
 }
+
+// =================================================================
+// EPIC - 3: PRIVACY, ENCRYPTION & USER SAFETY
+// =================================================================
+
+// PrivacyAuditLog tracks sensitive data access for compliance (Story 3.11)
+type PrivacyAuditLog struct {
+	ID            string    `json:"id" db:"id"`
+	ActorID       string    `json:"actor_id" db:"actor_id"`   // Identity who accessed data
+	TargetID      string    `json:"target_id" db:"target_id"` // Identity whose data was accessed
+	Action        string    `json:"action" db:"action"`       // e.g., "VIEW_PRIVATE_POST"
+	AccessGranted bool      `json:"access_granted" db:"access_granted"`
+	Reason        string    `json:"reason" db:"reason"` // e.g., "FOLLOW_RELATIONSHIP_VALID"
+	Timestamp     time.Time `json:"timestamp" db:"timestamp"`
+}
+
+// ProxyRequest holds metadata for the IP Masking Proxy (Story 3.14)
+type ProxyRequest struct {
+	RequestID   string    `json:"request_id"`
+	OriginalURL string    `json:"original_url"`
+	Method      string    `json:"method"`
+	UserAgent   string    `json:"user_agent"` // Scrubbed version
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// EncryptionEnvelope manages E2E message metadata (Story 3.1)
+type EncryptionEnvelope struct {
+	KeyID      string `json:"kid"`        // ID of the public key
+	Algorithm  string `json:"alg"`        // e.g., "X25519-ChaCha20-Poly1305"
+	Nonce      []byte `json:"nonce"`      // Random salt/IV
+	Ciphertext []byte `json:"ciphertext"` // The actual encrypted message
+}
+
+// VisibilityLevel represents specialized privacy scopes
+type VisibilityLevel string
+
+const (
+	VisibilityCircle  VisibilityLevel = "circle"  // Specific user-defined group
+	VisibilityMutuals VisibilityLevel = "mutuals" // Only if both follow each other
+)

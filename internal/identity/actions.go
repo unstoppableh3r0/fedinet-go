@@ -68,22 +68,14 @@ func UpdateBio(identityID, newBio string) error {
 		"profile",
 		identityID,
 		"",
-		"bio updated",
-	)
-}
-
-func LikePost(actorID, postID string) error {
-	return LogActivity(
-		actorID,
-		"LIKE",
-		"post",
-		postID,
-		"",
-		"",
+		`{"action": "bio updated"}`,
 	)
 }
 
 func LogActivity(actorID, verb, objectType, objectID, targetID, payload string) error {
+	if payload == "" {
+		payload = "{}"
+	}
 	_, err := db.Exec(
 		`INSERT INTO activities
 		(actor_id, verb, object_type, object_id, target_id, payload)
@@ -107,7 +99,9 @@ func GetProfileByUserID(userID string) (*Profile, error) {
 			followers_visibility,
 			following_visibility,
 			created_at,
-			updated_at
+			updated_at,
+			(SELECT COUNT(*) FROM follows WHERE followee_user_id = profiles.user_id) as followers_count,
+			(SELECT COUNT(*) FROM follows WHERE follower_user_id = profiles.user_id) as following_count
 		FROM profiles
 		WHERE user_id = $1
 	`
@@ -127,6 +121,8 @@ func GetProfileByUserID(userID string) (*Profile, error) {
 		&p.FollowingVisibility,
 		&p.CreatedAt,
 		&p.UpdatedAt,
+		&p.FollowersCount,
+		&p.FollowingCount,
 	)
 
 	if err == sql.ErrNoRows {
@@ -296,16 +292,94 @@ func CreatePost(userID, content string) (string, error) {
 	return postID, nil
 }
 
-// GetUserPosts retrieves all posts by a specific user
-func GetUserPosts(userID string) ([]Post, error) {
+// ToggleLike toggles the like status for a post
+func ToggleLike(userID, postID string) error {
+	// Check if already liked
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM likes WHERE user_id=$1 AND post_id=$2)", userID, postID).Scan(&exists)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		_, err = db.Exec("DELETE FROM likes WHERE user_id=$1 AND post_id=$2", userID, postID)
+	} else {
+		_, err = db.Exec("INSERT INTO likes (user_id, post_id) VALUES ($1, $2)", userID, postID)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// Log activity (only for liking)
+	if !exists {
+		return LogActivity(userID, "LIKE", "post", postID, "", "")
+	}
+	return nil
+}
+
+// ToggleRepost toggles the repost status for a post
+func ToggleRepost(userID, postID string) error {
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM reposts WHERE user_id=$1 AND post_id=$2)", userID, postID).Scan(&exists)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		_, err = db.Exec("DELETE FROM reposts WHERE user_id=$1 AND post_id=$2", userID, postID)
+	} else {
+		_, err = db.Exec("INSERT INTO reposts (user_id, post_id) VALUES ($1, $2)", userID, postID)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return LogActivity(userID, "REPOST", "post", postID, "", "")
+	}
+	return nil
+}
+
+// CreateReply creates a new reply
+func CreateReply(userID, postID, content string) (string, error) {
+	var replyID string
+	err := db.QueryRow(`
+		INSERT INTO replies (post_id, user_id, content)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, postID, userID, content).Scan(&replyID)
+
+	if err != nil {
+		return "", err
+	}
+
+	LogActivity(userID, "REPLY", "post", postID, "", content)
+	return replyID, nil
+}
+
+// GetUserPosts retrieves posts by a specific user with pagination and viewer state
+func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]Post, error) {
 	query := `
-		SELECT id, author, content, created_at, updated_at
-		FROM posts
-		WHERE author = $1
-		ORDER BY created_at DESC
+		SELECT 
+			p.id, 
+			p.author, 
+			p.content, 
+			p.created_at, 
+			p.updated_at,
+			(SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
+			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
+			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) as has_liked,
+			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted
+		FROM posts p
+		WHERE p.author = $1
+		ORDER BY p.created_at DESC
+		LIMIT $3 OFFSET $4
 	`
 
-	rows, err := db.Query(query, userID)
+	rows, err := db.Query(query, targetUserID, viewerUserID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +388,11 @@ func GetUserPosts(userID string) ([]Post, error) {
 	var posts []Post
 	for rows.Next() {
 		var p Post
-		err := rows.Scan(&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt)
+		err := rows.Scan(
+			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
+			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
+			&p.HasLiked, &p.HasReposted,
+		)
 		if err != nil {
 			return nil, err
 		}

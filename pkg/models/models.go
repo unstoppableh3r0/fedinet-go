@@ -6,6 +6,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// Visibility represents content visibility settings
+type Visibility string
+
+const (
+	VisibilityPublic    Visibility = "public"
+	VisibilityFollowers Visibility = "followers"
+	VisibilityPrivate   Visibility = "private"
+	VisibilityServer    Visibility = "server"
+)
+
 type Identity struct {
 	ID             uuid.UUID `json:"id"`
 	UserID         string    `json:"user_id"`
@@ -64,6 +74,22 @@ type Post struct {
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	LikeCount   int `json:"like_count"`
+	ReplyCount  int `json:"reply_count"`
+	RepostCount int `json:"repost_count"`
+
+	HasLiked    bool `json:"has_liked"`
+	HasReposted bool `json:"has_reposted"`
+}
+
+type Reply struct {
+	ID        string    `json:"id"`
+	PostID    string    `json:"post_id"`
+	UserID    string    `json:"user_id"`
+	Content   string    `json:"content"`
+	ParentID  *string   `json:"parent_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Message struct {
@@ -87,11 +113,45 @@ type UpdateProfileRequest struct {
 	FollowingVisibility *string `json:"following_visibility,omitempty"`
 }
 
-/*
-===============================
-EPIC 5 – Moderation
-===============================
-*/
+// =================================================================
+// EPIC 3 — PRIVACY, ENCRYPTION & USER SAFETY
+// =================================================================
+
+type PrivacyAuditLog struct {
+	ID            string    `json:"id" db:"id"`
+	ActorID       string    `json:"actor_id" db:"actor_id"`
+	TargetID      string    `json:"target_id" db:"target_id"`
+	Action        string    `json:"action" db:"action"`
+	AccessGranted bool      `json:"access_granted" db:"access_granted"`
+	Reason        string    `json:"reason" db:"reason"`
+	Timestamp     time.Time `json:"timestamp" db:"timestamp"`
+}
+
+type ProxyRequest struct {
+	RequestID   string    `json:"request_id"`
+	OriginalURL string    `json:"original_url"`
+	Method      string    `json:"method"`
+	UserAgent   string    `json:"user_agent"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type EncryptionEnvelope struct {
+	KeyID      string `json:"kid"`
+	Algorithm  string `json:"alg"`
+	Nonce      []byte `json:"nonce"`
+	Ciphertext []byte `json:"ciphertext"`
+}
+
+type VisibilityLevel string
+
+const (
+	VisibilityCircle  VisibilityLevel = "circle"
+	VisibilityMutuals VisibilityLevel = "mutuals"
+)
+
+// =================================================================
+// EPIC 5 — GOVERNANCE & MODERATION
+// =================================================================
 
 type ReportStatus string
 

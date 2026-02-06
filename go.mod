@@ -1,4 +1,4 @@
-module github.com/yourusername/fedinet-go
+module github.com/unstoppableh3r0/fedinet-go
 
 go 1.25.6
 

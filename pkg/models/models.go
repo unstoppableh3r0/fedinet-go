@@ -75,12 +75,10 @@ type Post struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Social Counts
 	LikeCount   int `json:"like_count"`
 	ReplyCount  int `json:"reply_count"`
 	RepostCount int `json:"repost_count"`
 
-	// User State (for the viewer)
 	HasLiked    bool `json:"has_liked"`
 	HasReposted bool `json:"has_reposted"`
 }
@@ -116,41 +114,92 @@ type UpdateProfileRequest struct {
 }
 
 // =================================================================
-// EPIC - 3: PRIVACY, ENCRYPTION & USER SAFETY
+// EPIC 3 — PRIVACY, ENCRYPTION & USER SAFETY
 // =================================================================
 
-// PrivacyAuditLog tracks sensitive data access for compliance (Story 3.11)
 type PrivacyAuditLog struct {
 	ID            string    `json:"id" db:"id"`
-	ActorID       string    `json:"actor_id" db:"actor_id"`   // Identity who accessed data
-	TargetID      string    `json:"target_id" db:"target_id"` // Identity whose data was accessed
-	Action        string    `json:"action" db:"action"`       // e.g., "VIEW_PRIVATE_POST"
+	ActorID       string    `json:"actor_id" db:"actor_id"`
+	TargetID      string    `json:"target_id" db:"target_id"`
+	Action        string    `json:"action" db:"action"`
 	AccessGranted bool      `json:"access_granted" db:"access_granted"`
-	Reason        string    `json:"reason" db:"reason"` // e.g., "FOLLOW_RELATIONSHIP_VALID"
+	Reason        string    `json:"reason" db:"reason"`
 	Timestamp     time.Time `json:"timestamp" db:"timestamp"`
 }
 
-// ProxyRequest holds metadata for the IP Masking Proxy (Story 3.14)
 type ProxyRequest struct {
 	RequestID   string    `json:"request_id"`
 	OriginalURL string    `json:"original_url"`
 	Method      string    `json:"method"`
-	UserAgent   string    `json:"user_agent"` // Scrubbed version
+	UserAgent   string    `json:"user_agent"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// EncryptionEnvelope manages E2E message metadata (Story 3.1)
 type EncryptionEnvelope struct {
-	KeyID      string `json:"kid"`        // ID of the public key
-	Algorithm  string `json:"alg"`        // e.g., "X25519-ChaCha20-Poly1305"
-	Nonce      []byte `json:"nonce"`      // Random salt/IV
-	Ciphertext []byte `json:"ciphertext"` // The actual encrypted message
+	KeyID      string `json:"kid"`
+	Algorithm  string `json:"alg"`
+	Nonce      []byte `json:"nonce"`
+	Ciphertext []byte `json:"ciphertext"`
 }
 
-// VisibilityLevel represents specialized privacy scopes
 type VisibilityLevel string
 
 const (
-	VisibilityCircle  VisibilityLevel = "circle"  // Specific user-defined group
-	VisibilityMutuals VisibilityLevel = "mutuals" // Only if both follow each other
+	VisibilityCircle  VisibilityLevel = "circle"
+	VisibilityMutuals VisibilityLevel = "mutuals"
 )
+
+// =================================================================
+// EPIC 5 — GOVERNANCE & MODERATION
+// =================================================================
+
+type ReportStatus string
+
+const (
+	ReportPending  ReportStatus = "pending"
+	ReportResolved ReportStatus = "resolved"
+)
+
+type Report struct {
+	ID           int64        `json:"id"`
+	ReporterID   string       `json:"reporter_id"`
+	TargetRef    string       `json:"target_ref"`
+	TargetServer string       `json:"target_server"`
+	Reason       string       `json:"reason"`
+	Status       ReportStatus `json:"status"`
+	CreatedAt    time.Time    `json:"created_at"`
+	ResolvedAt   *time.Time   `json:"resolved_at,omitempty"`
+	ResolvedBy   *string      `json:"resolved_by,omitempty"`
+}
+
+type BlockedServer struct {
+	ID        int64     `json:"id"`
+	Domain    string    `json:"domain"`
+	Reason    string    `json:"reason"`
+	BlockedAt time.Time `json:"blocked_at"`
+	BlockedBy string    `json:"blocked_by"`
+}
+
+type FederationEventType string
+
+const (
+	EventAbuseReportForward FederationEventType = "abuse_report_forward"
+	EventServerBlockNotice  FederationEventType = "server_block_notice"
+)
+
+type FederationEvent struct {
+	ID           int64               `json:"id"`
+	EventType    FederationEventType `json:"event_type"`
+	TargetServer string              `json:"target_server"`
+	Payload      []byte              `json:"payload"`
+	RetryCount   int                 `json:"retry_count"`
+	CreatedAt    time.Time           `json:"created_at"`
+	LastTriedAt  *time.Time          `json:"last_tried_at,omitempty"`
+}
+
+type BackupMetadata struct {
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Location  string    `json:"location"`
+	CreatedBy string    `json:"created_by"`
+}

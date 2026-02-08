@@ -53,6 +53,9 @@ func registerHandlers() {
 	http.HandleFunc("/federation/capabilities", CapabilitiesHandler)
 	http.HandleFunc("/federation/discover", DiscoverCapabilitiesHandler)
 
+	// Identity Lookup
+	http.HandleFunc("/federation/lookup", HandleFederatedLookup)
+
 	// Health endpoint
 	http.HandleFunc("/federation/health", HealthHandler)
 

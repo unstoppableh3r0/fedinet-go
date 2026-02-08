@@ -122,6 +122,7 @@ type InboxRequest struct {
 	ActorServer  string                 `json:"actor_server"`
 	Target       *string                `json:"target,omitempty"`
 	Payload      map[string]interface{} `json:"payload"`
+	Signature    *string                `json:"signature,omitempty"`
 }
 
 // ============================================================================

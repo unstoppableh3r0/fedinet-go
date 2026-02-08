@@ -33,8 +33,11 @@ func ToInternalID(externalID string) string {
 	config, err := GetServerConfig()
 	if err != nil {
 		log.Println("Error fetching server config:", err)
-		return externalID // Fallback
+		return strings.ToLower(externalID) // Fallback & Normalize
 	}
+
+	// Normalize input
+	externalID = strings.ToLower(externalID)
 
 	suffix := "@" + config.ServerName
 	if strings.HasSuffix(externalID, suffix) {

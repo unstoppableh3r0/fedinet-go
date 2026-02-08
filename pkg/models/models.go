@@ -18,12 +18,50 @@ const (
 
 type Identity struct {
 	ID             uuid.UUID `json:"id"`
+	DID            string    `json:"did,omitempty"` // Decentralized Identifier
 	UserID         string    `json:"user_id"`
 	HomeServer     string    `json:"home_server"`
 	PublicKey      string    `json:"public_key"`
 	AllowDiscovery bool      `json:"allow_discovery"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+
+	// Crypto & Federation
+	Signature       string   `json:"signature,omitempty"`         // Self-signed Identity
+	KeyVersion      int      `json:"key_version"`                 // Current key version
+	RecoveryKeyHash string   `json:"recovery_key_hash,omitempty"` // Hashed recovery key
+	Metadata        Metadata `json:"metadata,omitempty"`          // Extensible metadata
+	PrivateKey      string   `json:"-"`                           // Encrypted private key (never JSON exported)
+}
+
+type Metadata map[string]interface{}
+
+// PortableProfile represents a full export of a user's data
+type PortableProfile struct {
+	User        UserDocument `json:"user_document"`
+	Posts       []Post       `json:"posts"`
+	Followers   []string     `json:"followers"`
+	Following   []string     `json:"following"`
+	ExportedAt  time.Time    `json:"exported_at"`
+	IdentitySig string       `json:"identity_signature"` // Signed by the Identity Key
+}
+
+// KeyRevocation represents a revoked key
+type KeyRevocation struct {
+	KeyID      string    `json:"key_id"`
+	IdentityID uuid.UUID `json:"identity_id"`
+	Reason     string    `json:"reason"`
+	RevokedAt  time.Time `json:"revoked_at"`
+	Signature  string    `json:"signature"` // Signed by a valid key (or recovery key)
+}
+
+// BlockEvent represents a federation-wide block
+type BlockEvent struct {
+	BlockerID string    `json:"blocker_id"`
+	BlockedID string    `json:"blocked_id"`
+	Reason    string    `json:"reason,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	Signature string    `json:"signature"`
 }
 
 type Profile struct {
@@ -41,6 +79,8 @@ type Profile struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 	FollowersCount      *int       `json:"followers_count,omitempty"`
 	FollowingCount      *int       `json:"following_count,omitempty"`
+
+	Version int `json:"version"` // For sync versioning
 }
 
 type UserDocument struct {

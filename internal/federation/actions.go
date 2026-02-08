@@ -249,6 +249,17 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 		return uuid.Nil, fmt.Errorf("rate limit exceeded")
 	}
 
+	// Check if target has blocked the actor (User-to-User Block Enforcement)
+	if targetID != nil {
+		blocked, err := IsUserBlocked(*targetID, actorID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("failed to check user block status: %w", err)
+		}
+		if blocked {
+			return uuid.Nil, fmt.Errorf("actor is blocked by target")
+		}
+	}
+
 	// Serialize payload
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -271,7 +282,44 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 	// Send acknowledgment
 	go SendAcknowledgment(activityID, actorServer, "received", nil)
 
+	// Dispatch for processing (async or sync?)
+	// For MVP, lets do it in background to avoid blocking response,
+	// but typically we might want to know if it failed validity checks beyond signature.
+	go func() {
+		activity := InboxActivity{
+			ID:           activityID,
+			ActivityType: activityType,
+			ActorID:      actorID,
+			ActorServer:  actorServer,
+			TargetID:     targetID,
+			Payload:      string(payloadJSON),
+		}
+		DispatchActivity(&activity)
+	}()
+
 	return activityID, nil
+}
+
+func DispatchActivity(activity *InboxActivity) {
+	var err error
+	switch activity.ActivityType {
+	case "Update":
+		err = HandleProfileUpdate(activity)
+		// Add other cases here
+	}
+
+	status := "processed"
+	var errMsg *string
+	if err != nil {
+		status = "failed"
+		msg := err.Error()
+		errMsg = &msg
+		log.Printf("Failed to process activity %s: %v", activity.ID, err)
+	}
+
+	// Update status
+	db.Exec(`UPDATE inbox_activities SET status=$1, error_message=$2, processed_at=NOW() WHERE id=$3`,
+		status, errMsg, activity.ID)
 }
 
 // PublishOutboundActivity creates and queues outbound activities
@@ -825,4 +873,16 @@ func GetHealthStatus() (*InstanceHealth, error) {
 
 func stringPtr(s string) *string {
 	return &s
+}
+
+// IsUserBlocked checks if a user has blocked another user
+func IsUserBlocked(blockerID, blockedID string) (bool, error) {
+	var blocked bool
+	err := db.QueryRow(`
+        SELECT EXISTS(
+            SELECT 1 FROM block_events 
+            WHERE blocker_id = $1 AND blocked_id = $2
+        )
+    `, blockerID, blockedID).Scan(&blocked)
+	return blocked, err
 }

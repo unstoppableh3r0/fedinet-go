@@ -29,6 +29,12 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify Signature
+	if err := VerifyRequestSignature(req); err != nil {
+		sendError(w, http.StatusUnauthorized, "invalid_signature", "Signature verification failed", err.Error())
+		return
+	}
+
 	// Process the inbound activity
 	activityID, err := ProcessInboundActivity(
 		req.ActivityType,
@@ -438,4 +444,40 @@ func sendError(w http.ResponseWriter, statusCode int, errorType, message, detail
 	json.NewEncoder(w).Encode(response)
 
 	log.Printf("Error [%s]: %s - %s", errorType, message, details)
+}
+
+// ============================================================================
+// User Story 1.2: Cross-Instance Account Discovery
+// ============================================================================
+
+// HandleFederatedLookup resolves a user handle to an identity
+func HandleFederatedLookup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
+		return
+	}
+
+	handle := r.URL.Query().Get("id")
+	if handle == "" {
+		sendError(w, http.StatusBadRequest, "missing_param", "id parameter required", "")
+		return
+	}
+
+	// Logic to resolve identity
+	doc, err := ResolveAccount(handle)
+	if err != nil {
+		if err.Error() == "identity not found" {
+			sendError(w, http.StatusNotFound, "not_found", "Identity not found", "")
+			return
+		}
+		// Check for other errors or return internal error
+		sendError(w, http.StatusInternalServerError, "lookup_failed", "Failed to resolve identity", err.Error())
+		return
+	}
+
+	sendSuccess(w, http.StatusOK, "Lookup successful", map[string]interface{}{
+		"handle":   handle,
+		"identity": doc.Identity,
+		"profile":  doc.Profile,
+	})
 }

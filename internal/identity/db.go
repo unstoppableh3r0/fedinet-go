@@ -12,7 +12,7 @@ import (
 var db *sql.DB
 
 func InitDB() {
-	_ = godotenv.Load()
+	_ = godotenv.Load("../../.env")
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {

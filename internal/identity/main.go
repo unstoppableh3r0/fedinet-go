@@ -14,10 +14,21 @@ func main() {
 	http.HandleFunc("/message", MessageHandler)
 	http.HandleFunc("/user/search", UserSearchHandler)
 	http.HandleFunc("/register", RegisterHandler)
+	http.HandleFunc("/login", LoginHandler)
 	http.HandleFunc("/user/me", MeHandler)
 	http.HandleFunc("/profile/update", UpdateProfileHandler)
 	http.HandleFunc("/post/create", CreatePostHandler)
 	http.HandleFunc("/posts/user", GetUserPostsHandler)
+
+	// Revocation
+	http.HandleFunc("/identity/revoke", RevokeKeyHandler)
+	http.HandleFunc("/identity/revocations", GetRevocationsHandler)
+
+	// Recovery & Blocking
+	http.HandleFunc("/identity/recover", RecoverAccountHandler)
+	http.HandleFunc("/identity/block", BlockUserHandler)
+	http.HandleFunc("/identity/unblock", UnblockUserHandler)
+	http.HandleFunc("/identity/blocks", GetBlocksHandler)
 
 	// Social Routes
 	http.HandleFunc("/post/like", ToggleLikeHandler)
@@ -45,12 +56,12 @@ func main() {
 	http.Handle("/admin/users/list", AdminAuthMiddleware(http.HandlerFunc(GetAllUsersHandler)))
 	http.Handle("/admin/stats", AdminAuthMiddleware(http.HandlerFunc(GetStatsHandler)))
 
-	log.Println("Go server running on :8080")
+	log.Println("Go server running on :8082")
 	log.Println("Admin endpoints available at /admin/*")
 	log.Println("User endpoints available at /*")
 
 	// THIS is what keeps the backend alive
-	log.Fatal(http.ListenAndServe(":8080", enableCORS(http.DefaultServeMux)))
+	log.Fatal(http.ListenAndServe(":8082", enableCORS(http.DefaultServeMux)))
 }
 
 func enableCORS(next http.Handler) http.Handler {

@@ -348,6 +348,7 @@ func CreateSchemaOnNewDB(newDB *sql.DB) error {
 		-- Identities table
 		CREATE TABLE identities (
 		  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		  did TEXT,
 		  user_id TEXT NOT NULL UNIQUE,
 		  home_server TEXT NOT NULL,
 		  public_key TEXT NOT NULL,

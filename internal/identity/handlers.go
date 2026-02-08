@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 )
 
 func FollowHandler(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +144,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Username string `json:"username"`
-		Password string `json:"password"` // Ignored for simulation
+		Password string `json:"password"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -156,11 +157,21 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate Username Format
+	if !ValidateUsername(req.Username) {
+		RespondWithError(w, http.StatusBadRequest, "invalid username format (alphanumeric, 3-30 chars)")
+		return
+	}
+
+	// Normalize
+	req.Username = strings.ToLower(req.Username)
+
 	// Always creating as localhost internal user
 	federatedUserID := req.Username + "@" + InternalServerName
-	homeServer := "http://localhost:8080"
+	homeServer := "http://localhost:8082"
 
-	if err := CreateAccount(federatedUserID, homeServer); err != nil {
+	recoveryKey, err := CreateAccount(federatedUserID, homeServer, req.Password)
+	if err != nil {
 		log.Println("Registration failed:", err)
 		if err.Error() == "user already exists" {
 			RespondWithError(w, http.StatusConflict, "username taken")
@@ -171,8 +182,9 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondWithJSON(w, http.StatusCreated, map[string]string{
-		"user_id":     ToExternalID(federatedUserID),
-		"home_server": homeServer,
+		"user_id":      ToExternalID(federatedUserID),
+		"home_server":  homeServer,
+		"recovery_key": recoveryKey,
 	})
 }
 

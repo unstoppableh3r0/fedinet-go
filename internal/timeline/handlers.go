@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 // ============ Ranking Preference Handlers ============
@@ -278,7 +280,7 @@ func CacheTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	// Get user's offline config
 	config, err := GetUserOfflineConfig(req.UserID)
 	if err != nil {
-		config = DefaultOfflineConfig()
+		config = models.DefaultOfflineConfig()
 	}
 
 	// Fetch timeline posts
@@ -427,7 +429,7 @@ func RecordServerLoadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var load ServerLoad
+	var load models.ServerLoad
 	if err := json.NewDecoder(r.Body).Decode(&load); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -470,10 +472,10 @@ func GetServerLoadHandler(w http.ResponseWriter, r *http.Request) {
 
 // fetchTimelinePosts is a placeholder for fetching posts from the database
 // In production, this would query the posts table with joins to user data
-func fetchTimelinePosts(userID string, limit int) []Post {
+func fetchTimelinePosts(userID string, limit int) []models.Post {
 	// Mock data for demonstration
 	// In production, this would fetch from the database
-	posts := []Post{
+	posts := []models.Post{
 		{
 			ID:          "1",
 			Author:      "user1",

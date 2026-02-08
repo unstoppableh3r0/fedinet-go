@@ -108,21 +108,6 @@ type Activity struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-type Post struct {
-	ID        string    `json:"id"`
-	Author    string    `json:"author"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-
-	LikeCount   int `json:"like_count"`
-	ReplyCount  int `json:"reply_count"`
-	RepostCount int `json:"repost_count"`
-
-	HasLiked    bool `json:"has_liked"`
-	HasReposted bool `json:"has_reposted"`
-}
-
 type Reply struct {
 	ID        string    `json:"id"`
 	PostID    string    `json:"post_id"`
@@ -189,6 +174,48 @@ const (
 	VisibilityMutuals VisibilityLevel = "mutuals"
 )
 
+// ===============================
+// EPIC 4 — CONTENT & TIMELINE
+// ===============================
+
+// Post represents a federated social post
+// Used by Epic 1, Epic 4, and Timeline service
+type Post struct {
+	ID        string    `json:"id"`
+	Author    string    `json:"author"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	LikeCount   int `json:"like_count"`
+	ReplyCount  int `json:"reply_count"`
+	RepostCount int `json:"repost_count"`
+
+	HasLiked    bool `json:"has_liked"`
+	HasReposted bool `json:"has_reposted"`
+
+	// Epic 4 additions (non-breaking)
+	IsEdited   bool `json:"is_edited"`
+	VersionNum int  `json:"version_num"`
+}
+
+// PostVersion represents a historical version of an edited post
+type PostVersion struct {
+	ID         uuid.UUID `json:"id"`
+	PostID     string    `json:"post_id"`
+	Version    int       `json:"version"`
+	Content    string    `json:"content"`
+	EditorID   string    `json:"editor_id"`
+	EditedAt   time.Time `json:"edited_at"`
+	ChangeNote *string   `json:"change_note,omitempty"`
+}
+
+// PostWithVersions bundles a post with its full edit history
+type PostWithVersions struct {
+	Post     Post          `json:"post"`
+	Versions []PostVersion `json:"versions"`
+}
+
 // =================================================================
 // EPIC 5 — GOVERNANCE & MODERATION
 // =================================================================
@@ -242,4 +269,66 @@ type BackupMetadata struct {
 	CreatedAt time.Time `json:"created_at"`
 	Location  string    `json:"location"`
 	CreatedBy string    `json:"created_by"`
+}
+
+// =================================================================
+// TIMELINE & OPTIMIZATION MODELS
+// =================================================================
+
+// CachedTimeline represents cached timeline data for offline access
+type CachedTimeline struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    string    `json:"user_id"`
+	PostData  string    `json:"post_data"` // JSON serialized []models.Post
+	CachedAt  time.Time `json:"cached_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	SizeBytes int64     `json:"size_bytes"`
+}
+
+type OfflineConfig struct {
+	MaxCacheSizeBytes int64         `json:"max_cache_size_bytes"`
+	MaxPostsPerUser   int           `json:"max_posts_per_user"`
+	CacheDuration     time.Duration `json:"cache_duration"`
+	AutoRefresh       bool          `json:"auto_refresh"`
+}
+
+func DefaultOfflineConfig() OfflineConfig {
+	return OfflineConfig{
+		MaxCacheSizeBytes: 50 * 1024 * 1024, // 50MB
+		MaxPostsPerUser:   500,
+		CacheDuration:     24 * time.Hour,
+		AutoRefresh:       true,
+	}
+}
+
+type RefreshConfig struct {
+	UserID          string        `json:"user_id"`
+	BaseInterval    time.Duration `json:"base_interval"`
+	CurrentInterval time.Duration `json:"current_interval"`
+	MinInterval     time.Duration `json:"min_interval"`
+	MaxInterval     time.Duration `json:"max_interval"`
+	LastActivity    time.Time     `json:"last_activity"`
+	LastRefresh     time.Time     `json:"last_refresh"`
+	AdaptiveEnabled bool          `json:"adaptive_enabled"`
+	ThrottleEnabled bool          `json:"throttle_enabled"`
+}
+
+func DefaultRefreshConfig(userID string) RefreshConfig {
+	return RefreshConfig{
+		UserID:          userID,
+		BaseInterval:    30 * time.Second,
+		CurrentInterval: 30 * time.Second,
+		MinInterval:     10 * time.Second,
+		MaxInterval:     5 * time.Minute,
+		AdaptiveEnabled: true,
+		ThrottleEnabled: true,
+	}
+}
+
+type ServerLoad struct {
+	CPUPercent     float64   `json:"cpu_percent"`
+	MemoryPercent  float64   `json:"memory_percent"`
+	ActiveConns    int       `json:"active_connections"`
+	RequestsPerSec float64   `json:"requests_per_sec"`
+	Timestamp      time.Time `json:"timestamp"`
 }

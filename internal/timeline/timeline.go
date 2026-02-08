@@ -7,6 +7,8 @@ import (
 	"log"
 	"math"
 	"time"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 // ============ Task 4.9: Customizable Ranking ============
@@ -43,7 +45,7 @@ func SetUserRankingPreference(userID string, mode RankingMode) error {
 }
 
 // RankPosts applies the specified ranking algorithm to posts
-func RankPosts(posts []Post, mode RankingMode, userID string) []RankedPost {
+func RankPosts(posts []models.Post, mode RankingMode, userID string) []RankedPost {
 	rankedPosts := make([]RankedPost, len(posts))
 
 	for i, post := range posts {
@@ -61,7 +63,7 @@ func RankPosts(posts []Post, mode RankingMode, userID string) []RankedPost {
 }
 
 // calculateRankScore computes the ranking score based on the mode
-func calculateRankScore(post Post, mode RankingMode) float64 {
+func calculateRankScore(post models.Post, mode RankingMode) float64 {
 	switch mode {
 	case RankingModeChronological:
 		// More recent posts get higher scores
@@ -122,7 +124,7 @@ func CreatePostVersion(postID, editorID, content string, version int, changeNote
 }
 
 // GetPostVersionHistory retrieves all versions of a post
-func GetPostVersionHistory(postID string) ([]PostVersion, error) {
+func GetPostVersionHistory(postID string) ([]models.PostVersion, error) {
 	rows, err := db.Query(`
 		SELECT id, post_id, version, content, editor_id, edited_at, change_note
 		FROM post_versions
@@ -134,9 +136,9 @@ func GetPostVersionHistory(postID string) ([]PostVersion, error) {
 	}
 	defer rows.Close()
 
-	versions := []PostVersion{}
+	versions := []models.PostVersion{}
 	for rows.Next() {
-		var v PostVersion
+		var v models.PostVersion
 		err := rows.Scan(&v.ID, &v.PostID, &v.Version, &v.Content, &v.EditorID, &v.EditedAt, &v.ChangeNote)
 		if err != nil {
 			log.Printf("Error scanning version: %v", err)
@@ -149,8 +151,8 @@ func GetPostVersionHistory(postID string) ([]PostVersion, error) {
 }
 
 // GetPostVersion retrieves a specific version of a post
-func GetPostVersion(postID string, version int) (*PostVersion, error) {
-	var v PostVersion
+func GetPostVersion(postID string, version int) (*models.PostVersion, error) {
+	var v models.PostVersion
 	err := db.QueryRow(`
 		SELECT id, post_id, version, content, editor_id, edited_at, change_note
 		FROM post_versions
@@ -176,7 +178,7 @@ func GetLatestVersionNumber(postID string) (int, error) {
 // ============ Task 4.14: Offline Mode ============
 
 // CacheTimelineForUser stores timeline data for offline access
-func CacheTimelineForUser(userID string, posts []Post, config OfflineConfig) error {
+func CacheTimelineForUser(userID string, posts []models.Post, config models.OfflineConfig) error {
 	// Limit posts according to config
 	if len(posts) > config.MaxPostsPerUser {
 		posts = posts[:config.MaxPostsPerUser]
@@ -209,7 +211,7 @@ func CacheTimelineForUser(userID string, posts []Post, config OfflineConfig) err
 }
 
 // GetCachedTimeline retrieves cached timeline data
-func GetCachedTimeline(userID string) ([]Post, error) {
+func GetCachedTimeline(userID string) ([]models.Post, error) {
 	var postData []byte
 	var expiresAt time.Time
 
@@ -227,7 +229,7 @@ func GetCachedTimeline(userID string) ([]Post, error) {
 		return nil, fmt.Errorf("cache expired")
 	}
 
-	var posts []Post
+	var posts []models.Post
 	if err := json.Unmarshal(postData, &posts); err != nil {
 		return nil, fmt.Errorf("failed to deserialize posts: %w", err)
 	}
@@ -236,8 +238,8 @@ func GetCachedTimeline(userID string) ([]Post, error) {
 }
 
 // RefreshCachedContent updates the cache when connectivity resumes
-func RefreshCachedContent(userID string, posts []Post) error {
-	config := DefaultOfflineConfig()
+func RefreshCachedContent(userID string, posts []models.Post) error {
+	config := models.DefaultOfflineConfig()
 	// Could load user-specific config from DB if needed
 	return CacheTimelineForUser(userID, posts, config)
 }
@@ -257,8 +259,8 @@ func CleanExpiredCaches() error {
 }
 
 // GetUserOfflineConfig retrieves user's offline configuration
-func GetUserOfflineConfig(userID string) (OfflineConfig, error) {
-	var config OfflineConfig
+func GetUserOfflineConfig(userID string) (models.OfflineConfig, error) {
+	var config models.OfflineConfig
 	var durationSeconds int
 
 	err := db.QueryRow(`
@@ -268,10 +270,10 @@ func GetUserOfflineConfig(userID string) (OfflineConfig, error) {
 	`, userID).Scan(&config.MaxCacheSizeBytes, &config.MaxPostsPerUser, &durationSeconds, &config.AutoRefresh)
 
 	if err == sql.ErrNoRows {
-		return DefaultOfflineConfig(), nil
+		return models.DefaultOfflineConfig(), nil
 	}
 	if err != nil {
-		return OfflineConfig{}, err
+		return models.OfflineConfig{}, err
 	}
 
 	config.CacheDuration = time.Duration(durationSeconds) * time.Second
@@ -281,8 +283,8 @@ func GetUserOfflineConfig(userID string) (OfflineConfig, error) {
 // ============ Task 4.15: Adaptive Feed Refresh ============
 
 // GetRefreshConfig retrieves the refresh configuration for a user
-func GetRefreshConfig(userID string) (RefreshConfig, error) {
-	var config RefreshConfig
+func GetRefreshConfig(userID string) (models.RefreshConfig, error) {
+	var config models.RefreshConfig
 	var baseSeconds, currentSeconds, minSeconds, maxSeconds int
 
 	err := db.QueryRow(`
@@ -294,10 +296,10 @@ func GetRefreshConfig(userID string) (RefreshConfig, error) {
 		&config.LastActivity, &config.LastRefresh, &config.AdaptiveEnabled, &config.ThrottleEnabled)
 
 	if err == sql.ErrNoRows {
-		return DefaultRefreshConfig(userID), nil
+		return models.DefaultRefreshConfig(userID), nil
 	}
 	if err != nil {
-		return RefreshConfig{}, err
+		return models.RefreshConfig{}, err
 	}
 
 	config.UserID = userID
@@ -310,7 +312,7 @@ func GetRefreshConfig(userID string) (RefreshConfig, error) {
 }
 
 // UpdateRefreshConfig saves the refresh configuration
-func UpdateRefreshConfig(config RefreshConfig) error {
+func UpdateRefreshConfig(config models.RefreshConfig) error {
 	_, err := db.Exec(`
 		INSERT INTO refresh_configs (
 			user_id, base_interval_seconds, current_interval_seconds, min_interval_seconds,
@@ -423,7 +425,7 @@ func GetActivityLevel(lastActivity time.Time) ActivityLevel {
 }
 
 // RecordServerLoad stores current server metrics
-func RecordServerLoad(load ServerLoad) error {
+func RecordServerLoad(load models.ServerLoad) error {
 	_, err := db.Exec(`
 		INSERT INTO server_load_metrics (cpu_percent, memory_percent, active_connections, requests_per_sec, timestamp)
 		VALUES ($1, $2, $3, $4, $5)

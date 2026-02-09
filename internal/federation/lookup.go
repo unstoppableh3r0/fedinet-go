@@ -5,13 +5,39 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
+// Types from identity package (duplicated here since both are main packages)
+type Identity struct {
+	ID             string
+	UserID         string
+	HomeServer     string
+	PublicKey      string
+	AllowDiscovery bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type Profile struct {
+	UserID      string
+	DisplayName string
+	Bio         *string
+	AvatarURL   *string
+	BannerURL   *string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type UserDocument struct {
+	Identity Identity
+	Profile  Profile
+}
+
 // ResolveAccount finds an identity and profile by handle (local or remote)
-func ResolveAccount(handle string) (*models.UserDocument, error) {
+func ResolveAccount(handle string) (*UserDocument, error) {
 	if handle == "" {
 		return nil, fmt.Errorf("empty handle")
 	}
@@ -52,7 +78,7 @@ func isLocalDomain(domain string) bool {
 	return domain == "" || domain == "localhost" || domain == "localhost:8080" || domain == "localhost:8081"
 }
 
-func resolveLocalIdentity(username string) (*models.UserDocument, error) {
+func resolveLocalIdentity(username string) (*UserDocument, error) {
 	// Query local DB
 	// We need to ensure we look up by the full federated ID if that's how it's stored.
 	// In RegisterHandler, we store "username@localhost" (or whatever InternalServerName is).
@@ -64,7 +90,7 @@ func resolveLocalIdentity(username string) (*models.UserDocument, error) {
 		// TODO: Load from config
 	}
 
-	var i models.Identity
+	var i Identity
 
 	err := db.QueryRow(`
 		SELECT id, user_id, home_server, public_key, allow_discovery, created_at, updated_at
@@ -80,7 +106,7 @@ func resolveLocalIdentity(username string) (*models.UserDocument, error) {
 		return nil, err
 	}
 	// Fetch Profile
-	var p models.Profile
+	var p Profile
 	err = db.QueryRow(`
 		SELECT user_id, display_name, bio, avatar_url, banner_url, created_at, updated_at
 		FROM profiles WHERE user_id = $1
@@ -91,19 +117,19 @@ func resolveLocalIdentity(username string) (*models.UserDocument, error) {
 	}
 
 	// Create UserDocument
-	doc := &models.UserDocument{
+	doc := &UserDocument{
 		Identity: i,
 		Profile:  p,
 	}
 	return doc, nil
 }
 
-func resolveRemoteIdentity(username, domain string) (*models.UserDocument, error) {
+func resolveRemoteIdentity(username, domain string) (*UserDocument, error) {
 	// 1. Construct Federated ID
 	federatedID := username + "@" + domain
 
 	// 2. Check Cache (DB)
-	var i models.Identity
+	var i Identity
 	err := db.QueryRow(`
 		SELECT id, user_id, home_server, public_key, allow_discovery, created_at, updated_at
 		FROM identities WHERE user_id = $1
@@ -118,7 +144,7 @@ func resolveRemoteIdentity(username, domain string) (*models.UserDocument, error
 		// Basic cache implementation
 		// For now return identity with empty profile if not cached?
 		// Or assume if identity is cached, we should try to fetch profile.
-		return &models.UserDocument{Identity: i, Profile: models.Profile{UserID: i.UserID, DisplayName: username}}, nil
+		return &UserDocument{Identity: i, Profile: Profile{UserID: i.UserID, DisplayName: username}}, nil
 	}
 
 	// 3. Cache Miss - Fetch Remote (Stub)

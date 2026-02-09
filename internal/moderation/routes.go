@@ -1,4 +1,4 @@
-package moderation
+package main
 
 import "net/http"
 

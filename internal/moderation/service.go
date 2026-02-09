@@ -1,10 +1,9 @@
-package moderation
+package main
 
 import (
 	"errors"
 	"time"
 
-	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 type Service struct {
@@ -22,12 +21,12 @@ func (s *Service) SubmitReport(
 	reason string,
 ) error {
 
-	report := &models.Report{
+	report := &Report{
 		ReporterID:   reporterID,
 		TargetRef:    targetRef,
 		TargetServer: targetServer,
 		Reason:       reason,
-		Status:       models.ReportPending,
+		Status:       ReportPending,
 		CreatedAt:    time.Now(),
 	}
 
@@ -52,7 +51,7 @@ func (s *Service) SubmitReport(
 	return nil
 }
 
-func (s *Service) ListPendingReports() ([]models.Report, error) {
+func (s *Service) ListPendingReports() ([]Report, error) {
 	return s.repo.ListPendingReports()
 }
 
@@ -79,7 +78,7 @@ func (s *Service) BlockServer(
 		return errors.New("server domain cannot be empty")
 	}
 
-	block := &models.BlockedServer{
+	block := &BlockedServer{
 		Domain:    domain,
 		Reason:    reason,
 		BlockedAt: time.Now(),
@@ -93,13 +92,13 @@ func (s *Service) BlockServer(
 	return s.notifyServerBlock(domain)
 }
 
-func (s *Service) forwardReport(report *models.Report) error {
+func (s *Service) forwardReport(report *Report) error {
 	return errors.New("federation unavailable")
 }
 
-func (s *Service) queueReportForward(report *models.Report) error {
-	event := &models.FederationEvent{
-		EventType:    models.EventAbuseReportForward,
+func (s *Service) queueReportForward(report *Report) error {
+	event := &FederationEvent{
+		EventType:    EventAbuseReportForward,
 		TargetServer: report.TargetServer,
 		Payload:      []byte{},
 		RetryCount:   0,
@@ -110,8 +109,8 @@ func (s *Service) queueReportForward(report *models.Report) error {
 }
 
 func (s *Service) notifyServerBlock(domain string) error {
-	event := &models.FederationEvent{
-		EventType:    models.EventServerBlockNotice,
+	event := &FederationEvent{
+		EventType:    EventServerBlockNotice,
 		TargetServer: domain,
 		Payload:      []byte{},
 		RetryCount:   0,

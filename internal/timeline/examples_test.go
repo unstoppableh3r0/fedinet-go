@@ -3,15 +3,13 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 // TestRankingModes demonstrates different ranking algorithms
 func TestRankingModes(t *testing.T) {
 	now := time.Now()
 
-	posts := []models.Post{
+	posts := []Post{
 		{
 			ID:          "1",
 			Author:      "user1",
@@ -134,7 +132,7 @@ func TestActivityLevel(t *testing.T) {
 // TestDefaultConfigs demonstrates default configurations
 func TestDefaultConfigs(t *testing.T) {
 	t.Run("Default Offline Config", func(t *testing.T) {
-		config := models.DefaultOfflineConfig()
+		config := DefaultOfflineConfig()
 
 		t.Logf("Max Cache Size: %d bytes (%.2f MB)",
 			config.MaxCacheSizeBytes,
@@ -149,7 +147,7 @@ func TestDefaultConfigs(t *testing.T) {
 	})
 
 	t.Run("Default Refresh Config", func(t *testing.T) {
-		config := models.DefaultRefreshConfig("test-user")
+		config := DefaultRefreshConfig("test-user")
 
 		t.Logf("Base Interval: %s", config.BaseInterval)
 		t.Logf("Min Interval: %s", config.MinInterval)
@@ -239,7 +237,7 @@ func TestUtilityFunctions(t *testing.T) {
 
 // Example demonstrates how to use the timeline features
 func ExampleRankPosts() {
-	posts := []models.Post{
+	posts := []Post{
 		{
 			ID:          "1",
 			Content:     "Test post",
@@ -260,11 +258,11 @@ func ExampleRankPosts() {
 // BenchmarkRankPosts benchmarks the ranking algorithm
 func BenchmarkRankPosts(b *testing.B) {
 	// Create sample posts
-	posts := make([]models.Post, 100)
+	posts := make([]Post, 100)
 	now := time.Now()
 
 	for i := 0; i < 100; i++ {
-		posts[i] = models.Post{
+		posts[i] = Post{
 			ID:          string(rune(i)),
 			Content:     "Test post",
 			CreatedAt:   now.Add(-time.Duration(i) * time.Hour),

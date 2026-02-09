@@ -101,3 +101,41 @@ type BlockEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 	Signature string    `json:"signature"`
 }
+
+// Visibility represents content visibility settings
+type Visibility string
+
+const (
+	VisibilityPublic    Visibility = "public"
+	VisibilityFollowers Visibility = "followers"
+	VisibilityPrivate   Visibility = "private"
+	VisibilityServer    Visibility = "server"
+)
+
+type Follow struct {
+	FollowerUserID     string    `json:"follower_user_id"`
+	FollowerHomeServer string    `json:"follower_home_server"`
+	FolloweeUserID     string    `json:"followee_user_id"`
+	FolloweeHomeServer string    `json:"followee_home_server"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type Activity struct {
+	ID         string    `json:"id"`
+	ActorID    string    `json:"actor_id"`
+	Verb       string    `json:"verb"`
+	ObjectType *string   `json:"object_type"`
+	ObjectID   *string   `json:"object_id"`
+	TargetID   *string   `json:"target_id"`
+	Payload    any       `json:"payload"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type Message struct {
+	ID        string    `json:"id"`
+	Sender    string    `json:"sender"`
+	Receiver  string    `json:"receiver"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}

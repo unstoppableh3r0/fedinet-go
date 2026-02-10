@@ -97,6 +97,7 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	identity, err := GetIdentityByUserID(internalUserID)
 	if err != nil {
+		log.Printf("GetIdentityByUserID error for user %s: %v", internalUserID, err)
 		RespondWithError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -112,6 +113,7 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	// ✅ REAL profile from PostgreSQL
 	profile, err := GetProfileByUserID(internalUserID)
 	if err != nil {
+		log.Printf("GetProfileByUserID error for user %s: %v", internalUserID, err)
 		RespondWithError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -201,6 +203,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 	// 2. Fetch Identity
 	identity, err := GetIdentityByUserID(internalID)
 	if err != nil {
+		log.Printf("MeHandler: GetIdentityByUserID error for user %s: %v", internalID, err)
 		RespondWithError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -212,6 +215,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 	// 3. Fetch Profile
 	profile, err := GetProfileByUserID(internalID)
 	if err != nil {
+		log.Printf("MeHandler: GetProfileByUserID error for user %s: %v", internalID, err)
 		RespondWithError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

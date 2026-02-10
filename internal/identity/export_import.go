@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"encoding/json"
 	"log"
@@ -20,8 +21,8 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 
 	internalID := ToInternalID(userID)
 
-	// 1. Fetch Identity (with PrivateKey)
-	var identity Identity
+	// 1. Fetch models.Identity (with PrivateKey)
+	var identity models.Identity
 	var encryptedPrivKey string // Store encrypted first
 	err := db.QueryRow(`
         SELECT id, user_id, home_server, public_key, private_key, allow_discovery, created_at, updated_at, key_version, recovery_key_hash
@@ -50,7 +51,7 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 
 	identity.UserID = ToExternalID(identity.UserID) // Export external format
 
-	// 2. Fetch Profile
+	// 2. Fetch models.Profile
 	profile, err := GetProfileByUserID(internalID)
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch profile")
@@ -92,8 +93,8 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Construct Bundle
-	export := PortableProfile{
-		User: UserDocument{
+	export := models.PortableProfile{
+		User: models.UserDocument{
 			Identity: identity,
 			Profile:  *profile,
 		},
@@ -121,7 +122,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var importData PortableProfile
+	var importData models.PortableProfile
 	if err := json.NewDecoder(r.Body).Decode(&importData); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -137,20 +138,20 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1.5 Validate Identity Document Structure
+	// 1.5 Validate models.Identity Document Structure
 	if !ValidateIdentityDocument(&importData.User.Identity) {
 		RespondWithError(w, http.StatusBadRequest, "invalid identity document")
 		return
 	}
 
-	// 2. Import Identity
+	// 2. Import models.Identity
 	// We treat this as a "Migration" or "Restore"
-	// For migration, we might want to update the HomeServer in the Identity to THIS server?
-	// User Story 1.14 says "Allow importing Identity to new server using Recovery Key"
+	// For migration, we might want to update the HomeServer in the models.Identity to THIS server?
+	// User Story 1.14 says "Allow importing models.Identity to new server using Recovery Key"
 	// Here we have the PRIVATE KEY. This is the "God Mode" import.
 
 	// Check if user exists locally
-	// Identity is a struct value, checking UserID presence
+	// models.Identity is a struct value, checking UserID presence
 	if importData.User.Identity.UserID == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing identity in export")
 		return
@@ -177,7 +178,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert Identity
+	// Upsert models.Identity
 	// We update HomeServer to US
 	_, err = tx.Exec(`
         INSERT INTO identities (
@@ -206,7 +207,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert Profile
+	// Upsert models.Profile
 	p := importData.User.Profile
 	_, err = tx.Exec(`
         INSERT INTO profiles (

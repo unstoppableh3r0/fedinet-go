@@ -15,7 +15,7 @@ import (
 func FollowUser(followerID, followeeID string) error {
 	_, err := db.Exec(
 		`INSERT INTO follows (follower_user_id, follower_home_server, followee_user_id, followee_home_server)
-		 VALUES ($1, 'http://localhost:8080', $2, 'http://localhost:8080')
+		 VALUES ($1, 'http://localhost:8082', $2, 'http://localhost:8082')
 		 ON CONFLICT DO NOTHING`,
 		followerID, followeeID,
 	)
@@ -252,9 +252,9 @@ func GetIdentityByUserID(userID string) (*Identity, error) {
 			allow_discovery,
 			created_at,
 			updated_at,
-            signature,
+            COALESCE(signature, '') as signature,
             key_version,
-            recovery_key_hash
+            COALESCE(recovery_key_hash, '') as recovery_key_hash
 		FROM identities
 		WHERE user_id = $1
 	`
@@ -368,7 +368,7 @@ func propagateProfileUpdate(userID string, req UpdateProfileRequest) error {
         SELECT DISTINCT follower_home_server 
         FROM follows 
         WHERE followee_user_id = $1 
-        AND follower_home_server != 'http://localhost:8080' -- Exclude local
+        AND follower_home_server != 'http://localhost:8082' -- Exclude local
         AND follower_home_server != ''
     `, userID)
 	if err != nil {

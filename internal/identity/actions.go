@@ -528,7 +528,7 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 	query := `
 		SELECT 
 			p.id, 
-			p.author, 
+			p.user_id, 
 			p.content, 
 			p.created_at, 
 			p.updated_at,
@@ -538,7 +538,7 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) as has_liked,
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted
 		FROM posts p
-		WHERE p.author = $1
+		WHERE p.user_id = $1
 		ORDER BY p.created_at DESC
 		LIMIT $3 OFFSET $4
 	`

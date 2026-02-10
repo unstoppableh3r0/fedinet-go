@@ -1,11 +1,12 @@
 package main
 
-import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 func FollowHandler(w http.ResponseWriter, r *http.Request) {
@@ -93,8 +94,12 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("Search request: original userID = %s", userID)
+
 	// Normalize incoming ID to find in DB
 	internalUserID := ToInternalID(userID)
+
+	log.Printf("Search request: converted to internalUserID = %s", internalUserID)
 
 	identity, err := GetIdentityByUserID(internalUserID)
 	if err != nil {
@@ -103,6 +108,7 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if identity == nil {
+		log.Printf("User not found in database: %s", internalUserID)
 		RespondWithError(w, http.StatusNotFound, "user not found")
 		return
 	}

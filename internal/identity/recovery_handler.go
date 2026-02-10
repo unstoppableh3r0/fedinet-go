@@ -34,7 +34,7 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 	// Normalize ID
 	internalID := ToInternalID(req.UserID)
 
-	// 1. Fetch Identity securely
+	// 1. Fetch models.Identity securely
 	identity, err := GetIdentityByUserID(internalID)
 	if err != nil {
 		log.Println("Recovery lookup error:", err)
@@ -103,7 +103,7 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update Identity
+	// Update models.Identity
 	_, err = tx.Exec(`
 		UPDATE identities 
 		SET public_key=$1, private_key=$2, key_version=key_version+1, recovery_key_hash=$3, updated_at=NOW()
@@ -111,7 +111,7 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 	`, newPubKey, encryptedPrivKey, newRecoveryHash, identity.ID)
 
 	if err != nil {
-		log.Println("Identity update failed:", err)
+		log.Println("models.Identity update failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "update failed")
 		return
 	}

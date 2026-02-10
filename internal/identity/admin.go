@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 // Admin JWT Claims
@@ -272,7 +273,7 @@ func GetServerStats() (*ServerStats, error) {
 }
 
 // GetAllUsers retrieves all users with basic info
-func GetAllUsers() ([]UserDocument, error) {
+func GetAllUsers() ([]models.UserDocument, error) {
 	rows, err := db.Query(`
 		SELECT 
 			i.id, i.user_id, i.home_server, i.public_key, i.allow_discovery, i.created_at, i.updated_at,
@@ -289,9 +290,9 @@ func GetAllUsers() ([]UserDocument, error) {
 	}
 	defer rows.Close()
 
-	var users []UserDocument
+	var users []models.UserDocument
 	for rows.Next() {
-		var doc UserDocument
+		var doc models.UserDocument
 		err := rows.Scan(
 			&doc.Identity.ID, &doc.Identity.UserID, &doc.Identity.HomeServer,
 			&doc.Identity.PublicKey, &doc.Identity.AllowDiscovery,

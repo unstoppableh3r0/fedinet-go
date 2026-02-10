@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"encoding/json"
 	"fmt"
@@ -8,8 +9,8 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
 
-// VerifyRequestSignature verifies the signature on an incoming InboxRequest
-func VerifyRequestSignature(req InboxRequest) error {
+// VerifyRequestSignature verifies the signature on an incoming models.InboxRequest
+func VerifyRequestSignature(req models.InboxRequest) error {
 	if req.Signature == nil || *req.Signature == "" {
 		// For MVP, we might allow unsigned requests if FederationMode is 'soft'?
 		// But user story emphasizes security.

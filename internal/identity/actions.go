@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 func FollowUser(followerID, followeeID string) error {
@@ -90,7 +91,7 @@ func LogActivity(actorID, verb, objectType, objectID, targetID, payload string) 
 	return err
 }
 
-func GetProfileByUserID(userID string) (*Profile, error) {
+func GetProfileByUserID(userID string) (*models.Profile, error) {
 	query := `
 		SELECT
 			user_id,
@@ -112,7 +113,7 @@ func GetProfileByUserID(userID string) (*Profile, error) {
 		WHERE user_id = $1
 	`
 
-	var p Profile
+	var p models.Profile
 	var birthDate sql.NullTime
 
 	err := db.QueryRow(query, userID).Scan(
@@ -141,10 +142,10 @@ func GetProfileByUserID(userID string) (*Profile, error) {
 		return nil, err
 	}
 
-	// Convert birth_date to string pointer
+	// Convert birth_date to time.Time pointer
 	if birthDate.Valid {
-		dateStr := birthDate.Time.Format("2006-01-02")
-		p.BirthDate = &dateStr
+		t := birthDate.Time
+		p.BirthDate = &t
 	}
 
 	return &p, nil
@@ -156,7 +157,7 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 		return "", fmt.Errorf("invalid user_id format")
 	}
 
-	// (Self-note: We don't have a full Identity struct here yet to validate via ValidateIdentityDocument
+	// (Self-note: We don't have a full models.Identity struct here yet to validate via ValidateIdentityDocument
 	// because we are about to create it. But we could construct a partial one or just rely on ValidateUserID
 	// which we just did. ValidateIdentityDocument checks ID(nil), UserID, PublicKey(empty), HomeServer, CreatedAt.
 	// Here we generate most of that. So explicit validation of the inputs is what we are doing.)
@@ -214,7 +215,7 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	// 2. Insert Identity
+	// 2. Insert models.Identity
 	identityID := uuid.New()
 	_, err = tx.Exec(`
 		INSERT INTO identities (
@@ -225,7 +226,7 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 		return "", err
 	}
 
-	// 3. Insert Default Profile
+	// 3. Insert Default models.Profile
 	_, err = tx.Exec(`
 		INSERT INTO profiles (
 			user_id, display_name, bio, location, 
@@ -242,7 +243,7 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 	return recoveryKey, tx.Commit()
 }
 
-func GetIdentityByUserID(userID string) (*Identity, error) {
+func GetIdentityByUserID(userID string) (*models.Identity, error) {
 	query := `
 		SELECT
 			id,
@@ -259,7 +260,7 @@ func GetIdentityByUserID(userID string) (*Identity, error) {
 		WHERE user_id = $1
 	`
 
-	var i Identity
+	var i models.Identity
 
 	err := db.QueryRow(query, userID).Scan(
 		&i.ID,
@@ -282,7 +283,7 @@ func GetIdentityByUserID(userID string) (*Identity, error) {
 		// Signature etc are nullable in DB? I added them as... TEXT.
 		// If they are NULL, Scan into string will fail?
 		// I should use sql.NullString or *string if they are nullable.
-		// Identity struct has Signature string.
+		// models.Identity struct has Signature string.
 		// If DB has NULL, Scan assigns to string? No, it errors.
 		// I should treat them as nullable in struct OR Ensure they are '' in DB (DEFAULT '').
 		// I didn't set DEFAULT '' in migration.
@@ -299,7 +300,7 @@ func GetIdentityByUserID(userID string) (*Identity, error) {
 }
 
 // UpdateProfile updates profile fields dynamically
-func UpdateProfile(req UpdateProfileRequest) error {
+func UpdateProfile(req models.UpdateProfileRequest) error {
 	query := "UPDATE profiles SET updated_at = NOW(), version = version + 1"
 	args := []interface{}{}
 	argCount := 1
@@ -362,7 +363,7 @@ func UpdateProfile(req UpdateProfileRequest) error {
 	return propagateProfileUpdate(req.UserID, req)
 }
 
-func propagateProfileUpdate(userID string, req UpdateProfileRequest) error {
+func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) error {
 	// 1. Get unique servers of followers
 	rows, err := db.Query(`
         SELECT DISTINCT follower_home_server 
@@ -523,7 +524,7 @@ func CreateReply(userID, postID, content string) (string, error) {
 	return replyID, nil
 }
 
-func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]Post, error) {
+func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]models.Post, error) {
 	query := `
 		SELECT 
 			p.id, 
@@ -548,9 +549,9 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]Post,
 	}
 	defer rows.Close()
 
-	var posts []Post
+	var posts []models.Post
 	for rows.Next() {
-		var p Post
+		var p models.Post
 		err := rows.Scan(
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,

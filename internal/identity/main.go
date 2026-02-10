@@ -35,6 +35,13 @@ func main() {
 	http.HandleFunc("/post/repost", ToggleRepostHandler)
 	http.HandleFunc("/post/reply", CreateReplyHandler)
 
+	// Feed and Social Discovery
+	http.HandleFunc("/feed", GetFeedHandler)
+	http.HandleFunc("/followers", GetFollowersHandler)
+	http.HandleFunc("/following", GetFollowingHandler)
+	http.HandleFunc("/messages", GetConversationsHandler)
+	http.HandleFunc("/messages/conversation", GetConversationMessagesHandler)
+
 	// User notification routes
 	http.HandleFunc("/notifications", GetUserNotificationsHandler)
 	http.HandleFunc("/notifications/read", MarkNotificationReadHandler)

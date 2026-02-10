@@ -9,30 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
-
-// Mock structures matching the federation models
-type InboxRequest struct {
-	ActivityType string                 `json:"activity_type"`
-	Actor        string                 `json:"actor"`
-	ActorServer  string                 `json:"actor_server"`
-	Target       *string                `json:"target,omitempty"`
-	Payload      map[string]interface{} `json:"payload"`
-}
-
-type FederationResponse struct {
-	Success bool                   `json:"success"`
-	Message string                 `json:"message,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty"`
-	Error   *ErrorResponse         `json:"error,omitempty"`
-}
-
-type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Type    string `json:"type"`
-	Message string `json:"message"`
-	Details string `json:"details,omitempty"`
-}
 
 // TestHealthEndpoint tests User Story 2.14: Instance Health API
 func TestHealthEndpoint(t *testing.T) {
@@ -91,13 +69,13 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 func TestInboxValidation(t *testing.T) {
 	tests := []struct {
 		name           string
-		payload        InboxRequest
+		payload        models.InboxRequest
 		expectedStatus int
 		expectedError  string
 	}{
 		{
 			name: "Valid activity",
-			payload: InboxRequest{
+			payload: models.InboxRequest{
 				ActivityType: "Follow",
 				Actor:        "alice",
 				ActorServer:  "https://test.com",
@@ -108,7 +86,7 @@ func TestInboxValidation(t *testing.T) {
 		},
 		{
 			name: "Missing activity type",
-			payload: InboxRequest{
+			payload: models.InboxRequest{
 				Actor:       "alice",
 				ActorServer: "https://test.com",
 				Payload:     map[string]interface{}{},
@@ -118,7 +96,7 @@ func TestInboxValidation(t *testing.T) {
 		},
 		{
 			name: "Missing actor",
-			payload: InboxRequest{
+			payload: models.InboxRequest{
 				ActivityType: "Follow",
 				ActorServer:  "https://test.com",
 				Payload:      map[string]interface{}{},
@@ -128,7 +106,7 @@ func TestInboxValidation(t *testing.T) {
 		},
 		{
 			name: "Missing actor server",
-			payload: InboxRequest{
+			payload: models.InboxRequest{
 				ActivityType: "Follow",
 				Actor:        "alice",
 				Payload:      map[string]interface{}{},
@@ -155,7 +133,7 @@ func TestInboxValidation(t *testing.T) {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
 			}
 
-			var response FederationResponse
+			var response models.FederationResponse
 			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 				t.Errorf("Failed to parse response: %v", err)
 			}
@@ -196,7 +174,7 @@ func TestFederationModes(t *testing.T) {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 			}
 
-			var response FederationResponse
+			var response models.FederationResponse
 			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 				t.Errorf("Failed to parse response: %v", err)
 			}
@@ -263,7 +241,7 @@ func TestBlockServerFlow(t *testing.T) {
 
 	// Verify block enforcement
 	t.Run("Block enforcement", func(t *testing.T) {
-		payload := InboxRequest{
+		payload := models.InboxRequest{
 			ActivityType: "Follow",
 			Actor:        "spammer",
 			ActorServer:  serverURL,
@@ -336,12 +314,12 @@ func mockCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func mockInboxHandler(w http.ResponseWriter, r *http.Request) {
-	var req InboxRequest
+	var req models.InboxRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(FederationResponse{
+		json.NewEncoder(w).Encode(models.FederationResponse{
 			Success: false,
-			Error: &ErrorResponse{
+			Error: &models.ErrorResponse{
 				Code:    400,
 				Type:    "invalid_json",
 				Message: "Invalid JSON",
@@ -352,9 +330,9 @@ func mockInboxHandler(w http.ResponseWriter, r *http.Request) {
 
 	if req.ActivityType == "" || req.Actor == "" || req.ActorServer == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(FederationResponse{
+		json.NewEncoder(w).Encode(models.FederationResponse{
 			Success: false,
-			Error: &ErrorResponse{
+			Error: &models.ErrorResponse{
 				Code:    400,
 				Type:    "missing_fields",
 				Message: "Missing required fields",
@@ -364,7 +342,7 @@ func mockInboxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FederationResponse{
+	json.NewEncoder(w).Encode(models.FederationResponse{
 		Success: true,
 		Message: "Activity received",
 		Data: map[string]interface{}{
@@ -378,7 +356,7 @@ func mockModeHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FederationResponse{
+	json.NewEncoder(w).Encode(models.FederationResponse{
 		Success: true,
 		Message: "Federation mode updated",
 	})
@@ -386,7 +364,7 @@ func mockModeHandler(w http.ResponseWriter, r *http.Request) {
 
 func mockRateLimitHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FederationResponse{
+	json.NewEncoder(w).Encode(models.FederationResponse{
 		Success: true,
 		Message: "Rate limit configured",
 	})
@@ -394,22 +372,22 @@ func mockRateLimitHandler(w http.ResponseWriter, r *http.Request) {
 
 func mockBlockHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FederationResponse{
+	json.NewEncoder(w).Encode(models.FederationResponse{
 		Success: true,
 		Message: "Server blocked successfully",
 	})
 }
 
 func mockInboxWithBlockCheck(w http.ResponseWriter, r *http.Request) {
-	var req InboxRequest
+	var req models.InboxRequest
 	json.NewDecoder(r.Body).Decode(&req)
 
 	// Simulate block check - if server contains "spam"
 	if req.ActorServer != "" {
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(FederationResponse{
+		json.NewEncoder(w).Encode(models.FederationResponse{
 			Success: false,
-			Error: &ErrorResponse{
+			Error: &models.ErrorResponse{
 				Code:    403,
 				Type:    "server_blocked",
 				Message: "Sender server is blocked",
@@ -419,5 +397,5 @@ func mockInboxWithBlockCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FederationResponse{Success: true})
+	json.NewEncoder(w).Encode(models.FederationResponse{Success: true})
 }

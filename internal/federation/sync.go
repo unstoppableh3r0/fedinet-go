@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"database/sql"
 	"encoding/json"
@@ -8,7 +9,7 @@ import (
 )
 
 // HandleProfileUpdate processes incoming Update activities for profiles
-func HandleProfileUpdate(activity *InboxActivity) error {
+func HandleProfileUpdate(activity *models.InboxActivity) error {
 	// 1. Parse Payload
 	// The payload should be the Object being updated (the Profile)
 	// ActivityPub: { type: "Update", object: { type: "Person", id: "...", ... } }
@@ -26,9 +27,9 @@ func HandleProfileUpdate(activity *InboxActivity) error {
 		// but ActivityPub specifies 'object' property for Update.
 		// Let's support both for robustness or sticky to spec.
 		// If "type" exists in top level and is "Person", maybe it's a direct representation?
-		// But the InboxActivity wrapper separated them.
-		// Let's assume standard { type: Update, object: { ... } } structure was passed to InboxActivity.Payload
-		// Wait, InboxActivity.Payload IS the JSONB of the Activity.
+		// But the models.InboxActivity wrapper separated them.
+		// Let's assume standard { type: Update, object: { ... } } structure was passed to models.InboxActivity.Payload
+		// Wait, models.InboxActivity.Payload IS the JSONB of the Activity.
 
 		// Let's check "type" of the activity, which we know is "Update".
 		// So we look for "object".

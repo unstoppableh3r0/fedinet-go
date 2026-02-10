@@ -44,7 +44,7 @@ func ApplyMigrations() {
 		`CREATE INDEX IF NOT EXISTS idx_reposts_post_id ON reposts(post_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_reposts_user_id ON reposts(user_id);`,
 
-		// Identity Schema Updates
+		// models.Identity Schema Updates
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS public_key TEXT;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS private_key TEXT;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS key_version INT DEFAULT 1;`,
@@ -54,7 +54,7 @@ func ApplyMigrations() {
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS did TEXT;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS password_hash TEXT;`,
 
-		// Profile Schema Updates
+		// models.Profile Schema Updates
 		`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS version INT DEFAULT 1;`,
 
 		// Key Revocations Table

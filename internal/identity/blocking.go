@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"database/sql"
 	"encoding/json"
@@ -148,9 +149,9 @@ func GetBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var blocks []BlockEvent
+	var blocks []models.BlockEvent
 	for rows.Next() {
-		var b BlockEvent
+		var b models.BlockEvent
 		b.BlockerID = userID
 		if err := rows.Scan(&b.BlockedID, &b.Reason, &b.CreatedAt, &b.Signature); err != nil {
 			continue

@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"bytes"
 	"database/sql"
@@ -59,7 +60,7 @@ func SendFederatedActivity(activityID uuid.UUID, targetServer string, payload ma
 // DeliverWithRetry implements exponential backoff retry logic
 func DeliverWithRetry(messageID uuid.UUID, targetServer string, payload map[string]interface{}, attemptNumber int) error {
 	// Create federation message
-	message := FederationRequest{
+	message := models.FederationRequest{
 		Version: "1.0.0",
 		Type:    "activity",
 		Sender:  "http://localhost:8081", // Should come from config
@@ -286,7 +287,7 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 	// For MVP, lets do it in background to avoid blocking response,
 	// but typically we might want to know if it failed validity checks beyond signature.
 	go func() {
-		activity := InboxActivity{
+		activity := models.InboxActivity{
 			ID:           activityID,
 			ActivityType: activityType,
 			ActorID:      actorID,
@@ -300,7 +301,7 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 	return activityID, nil
 }
 
-func DispatchActivity(activity *InboxActivity) {
+func DispatchActivity(activity *models.InboxActivity) {
 	var err error
 	switch activity.ActivityType {
 	case "Update":
@@ -355,7 +356,7 @@ func PublishOutboundActivity(activityType, actorID, targetServer string, targetI
 }
 
 // GetInboxActivities retrieves inbox activities for a target
-func GetInboxActivities(targetID string, limit int) ([]InboxActivity, error) {
+func GetInboxActivities(targetID string, limit int) ([]models.InboxActivity, error) {
 	rows, err := db.Query(`
 		SELECT id, activity_type, actor_id, actor_server, target_id, payload,
 		       received_at, processed_at, processed_by, status, error_message, created_at
@@ -370,9 +371,9 @@ func GetInboxActivities(targetID string, limit int) ([]InboxActivity, error) {
 	}
 	defer rows.Close()
 
-	var activities []InboxActivity
+	var activities []models.InboxActivity
 	for rows.Next() {
-		var a InboxActivity
+		var a models.InboxActivity
 		err := rows.Scan(
 			&a.ID, &a.ActivityType, &a.ActorID, &a.ActorServer, &a.TargetID,
 			&a.Payload, &a.ReceivedAt, &a.ProcessedAt, &a.ProcessedBy,
@@ -388,7 +389,7 @@ func GetInboxActivities(targetID string, limit int) ([]InboxActivity, error) {
 }
 
 // GetOutboxActivities retrieves outbox activities for an actor
-func GetOutboxActivities(actorID string, limit int) ([]OutboxActivity, error) {
+func GetOutboxActivities(actorID string, limit int) ([]models.OutboxActivity, error) {
 	rows, err := db.Query(`
 		SELECT id, activity_type, actor_id, target_server, target_id, payload,
 		       delivery_status, delivered_at, acknowledged_at, error_message,
@@ -404,9 +405,9 @@ func GetOutboxActivities(actorID string, limit int) ([]OutboxActivity, error) {
 	}
 	defer rows.Close()
 
-	var activities []OutboxActivity
+	var activities []models.OutboxActivity
 	for rows.Next() {
-		var a OutboxActivity
+		var a models.OutboxActivity
 		err := rows.Scan(
 			&a.ID, &a.ActivityType, &a.ActorID, &a.TargetServer, &a.TargetID,
 			&a.Payload, &a.DeliveryStatus, &a.DeliveredAt, &a.AcknowledgedAt,
@@ -427,7 +428,7 @@ func GetOutboxActivities(actorID string, limit int) ([]OutboxActivity, error) {
 
 // SendAcknowledgment sends a delivery confirmation
 func SendAcknowledgment(messageID uuid.UUID, receiverServer string, status string, reason *string) error {
-	ack := AcknowledgmentRequest{
+	ack := models.AcknowledgmentRequest{
 		MessageID: messageID,
 		Status:    status,
 		Reason:    reason,
@@ -542,8 +543,8 @@ func IncrementRateLimiter(serverURL, endpoint string) (bool, error) {
 }
 
 // GetRateLimitForServer retrieves server-specific limits
-func GetRateLimitForServer(serverURL, endpoint string) (*RateLimit, error) {
-	var rl RateLimit
+func GetRateLimitForServer(serverURL, endpoint string) (*models.RateLimit, error) {
+	var rl models.RateLimit
 
 	err := db.QueryRow(`
 		SELECT id, server_url, endpoint, requests_per_min, burst_allowance,
@@ -568,12 +569,12 @@ func GetRateLimitForServer(serverURL, endpoint string) (*RateLimit, error) {
 // ============================================================================
 
 // AdvertiseCapabilities returns local server capabilities
-func AdvertiseCapabilities() (*ServerCapabilities, error) {
+func AdvertiseCapabilities() (*models.ServerCapabilities, error) {
 	protocolVersions, _ := json.Marshal([]string{"1.0.0"})
 	supportedTypes, _ := json.Marshal([]string{"Follow", "Like", "Post", "Message"})
 	rateLimitInfo, _ := json.Marshal(map[string]int{"requests_per_min": 100, "burst": 20})
 
-	caps := &ServerCapabilities{
+	caps := &models.ServerCapabilities{
 		ID:               uuid.New(),
 		ServerURL:        "http://localhost:8081",
 		ProtocolVersions: string(protocolVersions),
@@ -591,9 +592,9 @@ func AdvertiseCapabilities() (*ServerCapabilities, error) {
 }
 
 // DiscoverRemoteCapabilities fetches remote server capabilities
-func DiscoverRemoteCapabilities(serverURL string) (*ServerCapabilities, error) {
+func DiscoverRemoteCapabilities(serverURL string) (*models.ServerCapabilities, error) {
 	// Check cache first
-	var caps ServerCapabilities
+	var caps models.ServerCapabilities
 	err := db.QueryRow(`
 		SELECT id, server_url, protocol_versions, supported_types, max_message_size,
 		       supports_retries, supports_acks, rate_limit_info, custom_features,
@@ -709,7 +710,7 @@ func UnblockServer(serverURL string) error {
 }
 
 // GetBlockedServers retrieves all active blocks
-func GetBlockedServers() ([]BlockedServer, error) {
+func GetBlockedServers() ([]models.FederationBlockedServer, error) {
 	rows, err := db.Query(`
 		SELECT id, server_url, reason, blocked_by, blocked_at, expires_at, is_active, created_at, updated_at
 		FROM blocked_servers
@@ -722,9 +723,9 @@ func GetBlockedServers() ([]BlockedServer, error) {
 	}
 	defer rows.Close()
 
-	var servers []BlockedServer
+	var servers []models.FederationBlockedServer
 	for rows.Next() {
-		var s BlockedServer
+		var s models.FederationBlockedServer
 		err := rows.Scan(&s.ID, &s.ServerURL, &s.Reason, &s.BlockedBy, &s.BlockedAt,
 			&s.ExpiresAt, &s.IsActive, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
@@ -776,8 +777,8 @@ func SetFederationMode(mode string, allowUnknown, requireCapNeg, strictValid *bo
 }
 
 // GetFederationConfig retrieves full config
-func GetFederationConfig() (*FederationConfig, error) {
-	var config FederationConfig
+func GetFederationConfig() (*models.FederationConfig, error) {
+	var config models.FederationConfig
 	err := db.QueryRow(`
 		SELECT id, mode, allow_unknown_servers, require_capability_neg, strict_validation,
 		       log_unknown_servers, auto_block_malicious, created_at, updated_at
@@ -847,8 +848,8 @@ func UpdateHealthMetrics() error {
 }
 
 // GetHealthStatus returns current health status
-func GetHealthStatus() (*InstanceHealth, error) {
-	var health InstanceHealth
+func GetHealthStatus() (*models.InstanceHealth, error) {
+	var health models.InstanceHealth
 
 	err := db.QueryRow(`
 		SELECT id, status, total_messages, successful_deliveries, failed_deliveries,

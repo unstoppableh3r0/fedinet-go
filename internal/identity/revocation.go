@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"database/sql"
 	"encoding/json"
@@ -102,9 +103,9 @@ func GetRevocationsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var revocations []KeyRevocation
+	var revocations []models.KeyRevocation
 	for rows.Next() {
-		var r KeyRevocation
+		var r models.KeyRevocation
 		r.IdentityID = identityID
 		if err := rows.Scan(&r.KeyID, &r.Reason, &r.RevokedAt, &r.Signature); err != nil {
 			continue

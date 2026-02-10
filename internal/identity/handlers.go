@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"encoding/json"
 	"log"
@@ -126,7 +127,7 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	identity.UserID = ToExternalID(identity.UserID)
 	profile.UserID = ToExternalID(profile.UserID)
 
-	doc := UserDocument{
+	doc := models.UserDocument{
 		Identity: *identity, // kept for later crypto use
 		Profile:  *profile,  // UI-safe
 	}
@@ -200,7 +201,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 
 	internalID := ToInternalID(userID)
 
-	// 2. Fetch Identity
+	// 2. Fetch models.Identity
 	identity, err := GetIdentityByUserID(internalID)
 	if err != nil {
 		log.Printf("MeHandler: GetIdentityByUserID error for user %s: %v", internalID, err)
@@ -212,7 +213,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Fetch Profile
+	// 3. Fetch models.Profile
 	profile, err := GetProfileByUserID(internalID)
 	if err != nil {
 		log.Printf("MeHandler: GetProfileByUserID error for user %s: %v", internalID, err)
@@ -229,7 +230,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 	profile.UserID = ToExternalID(profile.UserID)
 
 	// 4. Return combined document
-	doc := UserDocument{
+	doc := models.UserDocument{
 		Identity: *identity,
 		Profile:  *profile,
 	}
@@ -243,7 +244,7 @@ func UpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req UpdateProfileRequest
+	var req models.UpdateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -258,7 +259,7 @@ func UpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
 	req.UserID = ToInternalID(req.UserID)
 
 	if err := UpdateProfile(req); err != nil {
-		log.Println("Profile update failed:", err)
+		log.Println("models.Profile update failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "profile update failed")
 		return
 	}
@@ -293,7 +294,7 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 
 	postID, err := CreatePost(internalID, req.Content)
 	if err != nil {
-		log.Println("Post creation failed:", err)
+		log.Println("models.Post creation failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "post creation failed")
 		return
 	}

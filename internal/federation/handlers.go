@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"encoding/json"
 	"log"
@@ -17,7 +18,7 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req InboxRequest
+	var req models.InboxRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
 		return
@@ -143,7 +144,7 @@ func AcknowledgmentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req AcknowledgmentRequest
+	var req models.AcknowledgmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
 		return
@@ -191,7 +192,7 @@ func DiscoverCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req CapabilityRequest
+	var req models.CapabilityRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
 		return
@@ -229,7 +230,7 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := HealthResponse{
+	response := models.HealthResponse{
 		Status:               health.Status,
 		Timestamp:            health.LastHealthCheckAt,
 		Uptime:               health.UptimeSeconds,
@@ -280,7 +281,7 @@ func handleGetBlockedServers(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBlockServer(w http.ResponseWriter, r *http.Request) {
-	var req BlockServerRequest
+	var req models.BlockServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
 		return
@@ -349,7 +350,7 @@ func handleGetFederationMode(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSetFederationMode(w http.ResponseWriter, r *http.Request) {
-	var req FederationModeRequest
+	var req models.FederationModeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
 		return
@@ -382,7 +383,7 @@ func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req RateLimitConfig
+	var req models.RateLimitConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
 		return
@@ -418,7 +419,7 @@ func sendSuccess(w http.ResponseWriter, statusCode int, message string, data map
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
-	response := FederationResponse{
+	response := models.FederationResponse{
 		Success: true,
 		Message: message,
 		Data:    data,
@@ -431,9 +432,9 @@ func sendError(w http.ResponseWriter, statusCode int, errorType, message, detail
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
-	response := FederationResponse{
+	response := models.FederationResponse{
 		Success: false,
-		Error: &ErrorResponse{
+		Error: &models.ErrorResponse{
 			Code:    statusCode,
 			Type:    errorType,
 			Message: message,

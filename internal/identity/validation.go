@@ -1,5 +1,6 @@
 package main
 
+import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"regexp"
 	"strings"
@@ -41,8 +42,8 @@ func NormalizeUserID(userID string) string {
 	return strings.ToLower(strings.TrimSpace(userID))
 }
 
-// ValidateIdentityDocument checks if an Identity struct is valid
-func ValidateIdentityDocument(identity *Identity) bool {
+// ValidateIdentityDocument checks if an models.Identity struct is valid
+func ValidateIdentityDocument(identity *models.Identity) bool {
 	// 1. Check ID (UUID)
 	if identity.ID == uuid.Nil {
 		return false

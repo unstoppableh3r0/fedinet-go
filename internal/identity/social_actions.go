@@ -59,7 +59,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 // GetFollowers returns list of users following the specified user
 func GetFollowers(userID string) ([]models.UserDocument, error) {
 	query := `
-		SELECT DISTINCT f.follower_user_id
+		SELECT f.follower_user_id
 		FROM follows f
 		WHERE f.followee_user_id = $1
 		ORDER BY f.created_at DESC
@@ -104,7 +104,7 @@ func GetFollowers(userID string) ([]models.UserDocument, error) {
 // GetFollowing returns list of users that the specified user follows
 func GetFollowing(userID string) ([]models.UserDocument, error) {
 	query := `
-		SELECT DISTINCT f.followee_user_id
+		SELECT f.followee_user_id
 		FROM follows f
 		WHERE f.follower_user_id = $1
 		ORDER BY f.created_at DESC

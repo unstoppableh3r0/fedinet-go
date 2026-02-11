@@ -133,12 +133,24 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	identity.UserID = ToExternalID(identity.UserID)
 	profile.UserID = ToExternalID(profile.UserID)
 
-	doc := models.UserDocument{
-		Identity: *identity, // kept for later crypto use
-		Profile:  *profile,  // UI-safe
+	// Check if viewer follows this user
+	viewerID := r.URL.Query().Get("viewer_id")
+	isFollowing := false
+	if viewerID != "" && viewerID != userID {
+		internalViewerID := ToInternalID(viewerID)
+		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM follows WHERE follower_user_id=$1 AND followee_user_id=$2)", internalViewerID, internalUserID).Scan(&isFollowing)
+		if err != nil {
+			log.Println("Error checking follow status:", err)
+		}
 	}
 
-	RespondWithJSON(w, http.StatusOK, doc)
+	response := map[string]interface{}{
+		"identity":     *identity,
+		"profile":      *profile,
+		"is_following": isFollowing,
+	}
+
+	RespondWithJSON(w, http.StatusOK, response)
 }
 
 func strPtr(s string) *string {
@@ -152,8 +164,9 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		InviteCode string `json:"invite_code"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -163,6 +176,23 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	if req.Username == "" {
 		RespondWithError(w, http.StatusBadRequest, "username required")
+		return
+	}
+
+	// Validate invite code
+	if req.InviteCode == "" {
+		RespondWithError(w, http.StatusForbidden, "invite code required")
+		return
+	}
+
+	// Check invite
+	invite, err := ValidateInvite(req.InviteCode)
+	if err != nil {
+		RespondWithError(w, http.StatusForbidden, "invalid or expired invite: "+err.Error())
+		return
+	}
+	if invite.InviteType != "user" {
+		RespondWithError(w, http.StatusForbidden, "invalid invite type")
 		return
 	}
 
@@ -188,6 +218,21 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		RespondWithError(w, http.StatusInternalServerError, "internal registration error")
 		return
+	}
+
+	// Mark invite as used
+	// We need the internal ID but CreateAccount returns recovery key, not ID.
+	// We can look it up or just pass the federated ID if UseInvite handles it.
+	// But UseInvite expects an ID suitable for `invite_usage` table (uuid).
+	// `CreateAccount` inserts into `identities`. We need to fetch the ID.
+	identity, _ := GetIdentityByUserID(federatedUserID)
+	var userID string
+	if identity != nil {
+		userID = identity.ID.String()
+	}
+
+	if err := UseInvite(req.InviteCode, userID, r.RemoteAddr, r.UserAgent()); err != nil {
+		log.Printf("Error marking invite used: %v", err)
 	}
 
 	RespondWithJSON(w, http.StatusCreated, map[string]string{
@@ -369,38 +414,6 @@ func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "repost toggled"})
-}
-
-func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	var req struct {
-		UserID  string `json:"user_id"`
-		PostID  string `json:"post_id"`
-		Content string `json:"content"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-
-	if req.UserID == "" || req.PostID == "" || req.Content == "" {
-		RespondWithError(w, http.StatusBadRequest, "missing fields")
-		return
-	}
-
-	replyID, err := CreateReply(ToInternalID(req.UserID), req.PostID, req.Content)
-	if err != nil {
-		log.Println("Reply failed:", err)
-		RespondWithError(w, http.StatusInternalServerError, "reply failed")
-		return
-	}
-
-	RespondWithJSON(w, http.StatusCreated, map[string]string{"reply_id": replyID})
 }
 
 func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {

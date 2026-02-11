@@ -276,70 +276,16 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============ User Notification Handlers ============
+// NOTE: Replaced by notification_handlers.go
 
+/*
 // GetUserNotificationsHandler retrieves notifications for a user
 func GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id parameter required")
-		return
-	}
-
-	notifications, err := GetUserNotifications(userID, 50)
-	if err != nil {
-		log.Println("Failed to get notifications:", err)
-		RespondWithError(w, http.StatusInternalServerError, "failed to retrieve notifications")
-		return
-	}
-
-	// Get unread count
-	unreadCount, err := GetUnreadNotificationCount(userID)
-	if err != nil {
-		log.Println("Failed to get unread count:", err)
-		unreadCount = 0
-	}
-
-	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
-		"notifications": notifications,
-		"unread_count":  unreadCount,
-	})
+    ...
 }
 
 // MarkNotificationReadHandler marks a notification as read
 func MarkNotificationReadHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPost {
-		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	var req struct {
-		NotificationID string `json:"notification_id"`
-		UserID         string `json:"user_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-
-	if req.NotificationID == "" || req.UserID == "" {
-		RespondWithError(w, http.StatusBadRequest, "notification_id and user_id are required")
-		return
-	}
-
-	err := MarkNotificationAsRead(req.NotificationID, req.UserID)
-	if err != nil {
-		log.Println("Failed to mark notification as read:", err)
-		RespondWithError(w, http.StatusInternalServerError, "failed to update notification")
-		return
-	}
-
-	RespondWithJSON(w, http.StatusOK, map[string]string{
-		"message": "notification marked as read",
-	})
+    ...
 }
+*/

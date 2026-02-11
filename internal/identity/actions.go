@@ -24,9 +24,27 @@ func FollowUser(followerID, followeeID string) error {
 		return err
 	}
 
+	if err := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); err != nil {
+		return err
+	}
+
+	// Create Notification
+	return CreateNotification(followeeID, followerID, "FOLLOW", "")
+}
+
+func UnfollowUser(followerID, followeeID string) error {
+	_, err := db.Exec(
+		`DELETE FROM follows 
+ 		 WHERE follower_user_id = $1 AND followee_user_id = $2`,
+		followerID, followeeID,
+	)
+	if err != nil {
+		return err
+	}
+
 	return LogActivity(
 		followerID,
-		"FOLLOW",
+		"UNFOLLOW",
 		"user",
 		followeeID,
 		"",
@@ -483,7 +501,19 @@ func ToggleLike(userID, postID string) error {
 
 	// Log activity (only for liking)
 	if !exists {
-		return LogActivity(userID, "LIKE", "post", postID, "", "")
+		if err := LogActivity(userID, "LIKE", "post", postID, "", ""); err != nil {
+			return err
+		}
+
+		// Create Notification
+		// We need to find the post author to notify them
+		var authorID string
+		if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
+			if authorID != userID { // Don't notify self-likes
+				CreateNotification(authorID, userID, "LIKE", postID)
+			}
+		}
+		return nil
 	}
 	return nil
 }
@@ -511,20 +541,79 @@ func ToggleRepost(userID, postID string) error {
 	return nil
 }
 
-func CreateReply(userID, postID, content string) (string, error) {
+func CreateReply(userID, postID, content string, parentID *string) (string, error) {
 	var replyID string
 	err := db.QueryRow(`
-		INSERT INTO replies (post_id, user_id, content)
-		VALUES ($1, $2, $3)
+		INSERT INTO replies (post_id, user_id, content, parent_id)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id
-	`, postID, userID, content).Scan(&replyID)
+	`, postID, userID, content, parentID).Scan(&replyID)
 
 	if err != nil {
 		return "", err
 	}
 
-	LogActivity(userID, "REPLY", "post", postID, "", content)
+	payload := ""
+	if parentID != nil {
+		payload = fmt.Sprintf(`{"parent_id": "%s", "content": %q}`, *parentID, content)
+	} else {
+		payload = fmt.Sprintf(`{"content": %q}`, content)
+	}
+
+	LogActivity(userID, "REPLY", "post", postID, "", payload)
+
+	// Create Notification
+	// Notify post author
+	var authorID string
+	if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
+		if authorID != userID {
+			CreateNotification(authorID, userID, "REPLY", postID)
+		}
+	}
+
+	// If replying to a comment (parentID), notify that user too
+	if parentID != nil {
+		var parentAuthorID string
+		if err := db.QueryRow("SELECT user_id FROM replies WHERE id=$1", *parentID).Scan(&parentAuthorID); err == nil {
+			if parentAuthorID != userID && parentAuthorID != authorID { // Don't double notify if same person
+				CreateNotification(parentAuthorID, userID, "REPLY", postID)
+			}
+		}
+	}
+
 	return replyID, nil
+}
+
+type Reply struct {
+	ID        string    `json:"id"`
+	PostID    string    `json:"post_id"`
+	UserID    string    `json:"user_id"`
+	Content   string    `json:"content"`
+	ParentID  *string   `json:"parent_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func GetPostReplies(postID string) ([]Reply, error) {
+	rows, err := db.Query(`
+		SELECT id, post_id, user_id, content, parent_id, created_at
+		FROM replies
+		WHERE post_id = $1
+		ORDER BY created_at ASC
+	`, postID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var replies []Reply
+	for rows.Next() {
+		var r Reply
+		if err := rows.Scan(&r.ID, &r.PostID, &r.UserID, &r.Content, &r.ParentID, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		replies = append(replies, r)
+	}
+	return replies, nil
 }
 
 func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]models.Post, error) {
@@ -571,4 +660,12 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 	}
 
 	return posts, nil
+}
+
+func CreateNotification(recipientID, actorID, typeStr, entityID string) error {
+	_, err := db.Exec(`
+		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+	`, recipientID, actorID, typeStr, entityID)
+	return err
 }

@@ -77,6 +77,31 @@ func ApplyMigrations() {
 			PRIMARY KEY (blocker_id, blocked_id),
 			FOREIGN KEY (blocker_id) REFERENCES identities(user_id) ON DELETE CASCADE
 		);`,
+
+		// Outbox Activities Table (for Federation)
+		`CREATE TABLE IF NOT EXISTS outbox_activities (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			activity_type TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
+			target_server TEXT NOT NULL,
+			payload JSONB NOT NULL,
+			delivery_status TEXT DEFAULT 'pending', -- pending, sent, failed
+			attempt_count INT DEFAULT 0,
+			last_attempt_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// Notifications Table
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			recipient_id TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
+			type TEXT NOT NULL, -- FOLLOW, LIKE, REPLY, REPOST
+			entity_id TEXT, -- ID of the post or user involved
+			is_read BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP DEFAULT NOW(),
+			FOREIGN KEY (recipient_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
 	}
 
 	for _, schema := range schemas {

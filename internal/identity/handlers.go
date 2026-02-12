@@ -165,6 +165,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Username   string `json:"username"`
+		Email      string `json:"email"`
 		Password   string `json:"password"`
 		InviteCode string `json:"invite_code"`
 	}
@@ -176,6 +177,11 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	if req.Username == "" {
 		RespondWithError(w, http.StatusBadRequest, "username required")
+		return
+	}
+
+	if req.Email == "" {
+		RespondWithError(w, http.StatusBadRequest, "email required")
 		return
 	}
 
@@ -204,41 +210,74 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Normalize
 	req.Username = strings.ToLower(req.Username)
+	req.Email = strings.ToLower(req.Email)
 
-	// Always creating as localhost internal user
+	// Check if username already exists
 	federatedUserID := req.Username + "@" + InternalServerName
-	homeServer := "http://localhost:8082"
-
-	recoveryKey, err := CreateAccount(federatedUserID, homeServer, req.Password)
+	existingUser, err := GetIdentityByUserID(federatedUserID)
 	if err != nil {
-		log.Println("Registration failed:", err)
-		if err.Error() == "user already exists" {
-			RespondWithError(w, http.StatusConflict, "username taken")
-			return
-		}
-		RespondWithError(w, http.StatusInternalServerError, "internal registration error")
+		log.Printf("Error checking username: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if existingUser != nil {
+		RespondWithError(w, http.StatusConflict, "username already taken")
 		return
 	}
 
-	// Mark invite as used
-	// We need the internal ID but CreateAccount returns recovery key, not ID.
-	// We can look it up or just pass the federated ID if UseInvite handles it.
-	// But UseInvite expects an ID suitable for `invite_usage` table (uuid).
-	// `CreateAccount` inserts into `identities`. We need to fetch the ID.
-	identity, _ := GetIdentityByUserID(federatedUserID)
-	var userID string
-	if identity != nil {
-		userID = identity.ID.String()
+	// Check if email already exists
+	existingEmail, err := GetIdentityByEmail(req.Email)
+	if err != nil {
+		log.Printf("Error checking email: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if existingEmail != nil {
+		RespondWithError(w, http.StatusConflict, "email already registered")
+		return
 	}
 
-	if err := UseInvite(req.InviteCode, userID, r.RemoteAddr, r.UserAgent()); err != nil {
-		log.Printf("Error marking invite used: %v", err)
+	// Check OTP rate limit
+	if err := CheckOTPRateLimit(req.Email); err != nil {
+		RespondWithError(w, http.StatusTooManyRequests, err.Error())
+		return
 	}
 
-	RespondWithJSON(w, http.StatusCreated, map[string]string{
-		"user_id":      ToExternalID(federatedUserID),
-		"home_server":  homeServer,
-		"recovery_key": recoveryKey,
+	// Generate OTP
+	otpCode, err := GenerateOTP()
+	if err != nil {
+		log.Printf("Failed to generate OTP: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to generate OTP")
+		return
+	}
+
+	// Store OTP
+	sessionID, err := StoreOTP(req.Email, otpCode, "registration")
+	if err != nil {
+		log.Printf("Failed to store OTP: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to store OTP")
+		return
+	}
+
+	// Send OTP email
+	if err := SendOTPEmail(req.Email, otpCode, "registration"); err != nil {
+		log.Printf("Failed to send OTP email: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to send OTP email")
+		return
+	}
+
+	// Store registration data temporarily in a session (we'll use the OTP session_id as key)
+	// For now, we'll return session_id and expect the frontend to call /complete-registration
+	// after OTP verification
+
+	// Return session ID and masked email for OTP verification
+	maskedEmail := maskEmail(req.Email)
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"message":      "OTP sent to your email",
+		"session_id":   sessionID,
+		"email_hint":   maskedEmail,
+		"expires_in":   int(OTPExpiry.Seconds()),
+		"requires_otp": true,
 	})
 }
 

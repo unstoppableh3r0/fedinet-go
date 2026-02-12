@@ -1,0 +1,6 @@
+2026/02/12 15:04:46 Database connected
+2026/02/12 15:04:47 Database migrations applied successfully.
+2026/02/12 15:04:47 Go server running on :8082
+2026/02/12 15:04:47 ✅ Server initialized and ready
+2026/02/12 15:04:53 Login error: pq: column "email" does not exist
+2026/02/12 15:04:54 Login error: pq: column "email" does not exist

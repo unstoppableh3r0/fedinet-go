@@ -10,6 +10,10 @@ func main() {
 	InitDB()
 	ApplyMigrations()
 
+	// Start background cleanup jobs
+	go CleanupExpiredOTPs()
+	go CleanupExpiredTokens()
+
 	// Global initialization state
 	var isInitialized bool
 	var err error
@@ -44,45 +48,52 @@ func main() {
 	http.HandleFunc("/health", HealthCheckHandler)
 	http.HandleFunc("/server/info", GetServerInfoHandler)
 
-	// User Routes (Protected by Init Check)
-	http.HandleFunc("/follow", requireInit(FollowHandler))
-	http.HandleFunc("/message", requireInit(MessageHandler))
-	http.HandleFunc("/user/search", requireInit(UserSearchHandler))
-	http.HandleFunc("/register", requireInit(RegisterHandler))
-	http.HandleFunc("/login", requireInit(LoginHandler))
-	http.HandleFunc("/user/me", requireInit(MeHandler))
-	http.HandleFunc("/profile/update", requireInit(UpdateProfileHandler))
-	http.HandleFunc("/post/create", requireInit(CreatePostHandler))
-	http.HandleFunc("/posts/user", requireInit(GetUserPostsHandler))
+	// OTP and Authentication Routes (Public - no auth required)
+	http.HandleFunc("/register", requireInit(RegisterHandler))                          // Step 1: Send OTP
+	http.HandleFunc("/login", requireInit(LoginHandler))                                // Step 1: Send OTP
+	http.HandleFunc("/send-otp", requireInit(SendOTPHandler))                           // Generic OTP sending
+	http.HandleFunc("/verify-otp", requireInit(VerifyOTPHandler))                       // Step 2: Verify OTP and get tokens
+	http.HandleFunc("/complete-registration", requireInit(CompleteRegistrationHandler)) // Step 2: Create account after OTP
+	http.HandleFunc("/refresh-token", requireInit(RefreshTokenHandler))                 // Token refresh
+	http.HandleFunc("/logout", requireInit(LogoutHandler))                              // Logout and revoke token
 
-	// Revocation
-	http.HandleFunc("/identity/revoke", requireInit(RevokeKeyHandler))
-	http.HandleFunc("/identity/revocations", requireInit(GetRevocationsHandler))
+	// Protected User Routes (Require JWT Authentication)
+	http.HandleFunc("/follow", requireInit(AuthMiddleware(FollowHandler)))
+	http.HandleFunc("/message", requireInit(AuthMiddleware(MessageHandler)))
+	http.HandleFunc("/user/search", requireInit(AuthMiddleware(UserSearchHandler)))
+	http.HandleFunc("/user/me", requireInit(AuthMiddleware(MeHandler)))
+	http.HandleFunc("/profile/update", requireInit(AuthMiddleware(UpdateProfileHandler)))
+	http.HandleFunc("/post/create", requireInit(AuthMiddleware(CreatePostHandler)))
+	http.HandleFunc("/posts/user", requireInit(AuthMiddleware(GetUserPostsHandler)))
 
-	// Recovery & Blocking
-	http.HandleFunc("/identity/recover", requireInit(RecoverAccountHandler))
-	http.HandleFunc("/identity/block", requireInit(BlockUserHandler))
-	http.HandleFunc("/identity/unblock", requireInit(UnblockUserHandler))
-	http.HandleFunc("/identity/blocks", requireInit(GetBlocksHandler))
+	// Revocation (Protected)
+	http.HandleFunc("/identity/revoke", requireInit(AuthMiddleware(RevokeKeyHandler)))
+	http.HandleFunc("/identity/revocations", requireInit(AuthMiddleware(GetRevocationsHandler)))
 
-	// Social Routes
-	http.HandleFunc("/post/like", requireInit(ToggleLikeHandler))
-	http.HandleFunc("/post/repost", requireInit(ToggleRepostHandler))
-	http.HandleFunc("/post/reply", requireInit(CreateReplyHandler))
-	http.HandleFunc("/post/replies", requireInit(GetPostRepliesHandler))
+	// Recovery & Blocking (Protected)
+	http.HandleFunc("/identity/recover", requireInit(RecoverAccountHandler)) // Recovery is public
+	http.HandleFunc("/identity/block", requireInit(AuthMiddleware(BlockUserHandler)))
+	http.HandleFunc("/identity/unblock", requireInit(AuthMiddleware(UnblockUserHandler)))
+	http.HandleFunc("/identity/blocks", requireInit(AuthMiddleware(GetBlocksHandler)))
 
-	// Feed and Social Discovery
-	http.HandleFunc("/feed", requireInit(GetFeedHandler))
-	http.HandleFunc("/followers", requireInit(GetFollowersHandler))
-	http.HandleFunc("/following", requireInit(GetFollowingHandler))
-	http.HandleFunc("/follower/remove", requireInit(RemoveFollowerHandler))
-	http.HandleFunc("/unfollow", requireInit(UnfollowHandler))
-	http.HandleFunc("/messages", requireInit(GetConversationsHandler))
-	http.HandleFunc("/messages/conversation", requireInit(GetConversationMessagesHandler))
+	// Social Routes (Protected)
+	http.HandleFunc("/post/like", requireInit(AuthMiddleware(ToggleLikeHandler)))
+	http.HandleFunc("/post/repost", requireInit(AuthMiddleware(ToggleRepostHandler)))
+	http.HandleFunc("/post/reply", requireInit(AuthMiddleware(CreateReplyHandler)))
+	http.HandleFunc("/post/replies", requireInit(GetPostRepliesHandler)) // Public
 
-	// User notification routes
-	http.HandleFunc("/notifications", requireInit(GetNotificationsHandler))
-	http.HandleFunc("/notifications/read", requireInit(MarkNotificationsReadHandler))
+	// Feed and Social Discovery (Protected)
+	http.HandleFunc("/feed", requireInit(AuthMiddleware(GetFeedHandler)))
+	http.HandleFunc("/followers", requireInit(AuthMiddleware(GetFollowersHandler)))
+	http.HandleFunc("/following", requireInit(AuthMiddleware(GetFollowingHandler)))
+	http.HandleFunc("/follower/remove", requireInit(AuthMiddleware(RemoveFollowerHandler)))
+	http.HandleFunc("/unfollow", requireInit(AuthMiddleware(UnfollowHandler)))
+	http.HandleFunc("/messages", requireInit(AuthMiddleware(GetConversationsHandler)))
+	http.HandleFunc("/messages/conversation", requireInit(AuthMiddleware(GetConversationMessagesHandler)))
+
+	// User notification routes (Protected)
+	http.HandleFunc("/notifications", requireInit(AuthMiddleware(GetNotificationsHandler)))
+	http.HandleFunc("/notifications/read", requireInit(AuthMiddleware(MarkNotificationsReadHandler)))
 
 	// Admin routes (unprotected - but login needs init)
 	http.HandleFunc("/admin/login", requireInit(AdminLoginHandler))

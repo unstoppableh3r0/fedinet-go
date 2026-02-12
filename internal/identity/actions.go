@@ -264,6 +264,98 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 	return recoveryKey, tx.Commit()
 }
 
+// CreateAccountWithEmail atomically creates an identity with email and a default profile
+func CreateAccountWithEmail(userID, homeServer, email, password string) (string, error) {
+	if !ValidateUserID(userID) {
+		return "", fmt.Errorf("invalid user_id format")
+	}
+
+	// Generate Keys
+	pubKey, privKey, err := crypto.GenerateKeyPair()
+	if err != nil {
+		return "", err
+	}
+
+	// Generate Recovery Key
+	recoveryKey, recoveryHash, err := crypto.GenerateRecoveryKey()
+	if err != nil {
+		return "", err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	// 1. Check if user exists
+	var exists bool
+	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM identities WHERE user_id=$1)", userID).Scan(&exists)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return "", fmt.Errorf("user already exists")
+	}
+
+	// 2. Check if email exists
+	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM identities WHERE email=$1)", email).Scan(&exists)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return "", fmt.Errorf("email already registered")
+	}
+
+	// Encrypt Private Key
+	masterKey := os.Getenv("SERVER_MASTER_KEY")
+	if masterKey == "" {
+		masterKey = "0000000000000000000000000000000000000000000000000000000000000000" // 32 bytes hex
+		fmt.Println("WARNING: Using insecure default SERVER_MASTER_KEY")
+	}
+
+	encryptedPrivKey, err := crypto.Encrypt(privKey, masterKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to encrypt private key: %w", err)
+	}
+
+	// Generate DID (Decentralized Identifier)
+	did := "did:fedinet:" + crypto.HashString(pubKey)
+
+	// Hash password
+	passwordHash, err := HashPassword(password)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	// 3. Insert models.Identity with email
+	identityID := uuid.New()
+	_, err = tx.Exec(`
+		INSERT INTO identities (
+			id, did, user_id, home_server, email, public_key, private_key, key_version, recovery_key_hash, password_hash, allow_discovery, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, true, NOW(), NOW())
+	`, identityID, did, userID, homeServer, email, pubKey, encryptedPrivKey, recoveryHash, passwordHash)
+	if err != nil {
+		return "", err
+	}
+
+	// 4. Insert Default models.Profile
+	_, err = tx.Exec(`
+		INSERT INTO profiles (
+			user_id, display_name, bio, location, 
+			followers_visibility, following_visibility, created_at, updated_at, version
+		) VALUES (
+			$1, $2, 'Just joined Gotham Social', 'Unknown',
+			'public', 'public', NOW(), NOW(), 1
+		)
+	`, userID, userID) // Display name defaults to userID
+	if err != nil {
+		return "", err
+	}
+
+	return recoveryKey, tx.Commit()
+}
+
 func GetIdentityByUserID(userID string) (*models.Identity, error) {
 	query := `
 		SELECT

@@ -1,0 +1,14 @@
+2026/02/12 15:04:47 Timeline database connected successfully
+2026/02/12 15:04:47 Timeline migrations applied successfully
+2026/02/12 15:04:47 Timeline service running on :8083
+2026/02/12 15:04:47 Endpoints:
+2026/02/12 15:04:47   GET/POST /timeline/ranking/preference - Get/set ranking preferences
+2026/02/12 15:04:47   GET /timeline - Get ranked timeline
+2026/02/12 15:04:47   POST /timeline/post/edit - Edit post with versioning
+2026/02/12 15:04:47   GET /timeline/post/versions - Get version history
+2026/02/12 15:04:47   GET /timeline/post/version - Get specific version
+2026/02/12 15:04:47   GET/POST /timeline/cache - Get/create offline cache
+2026/02/12 15:04:47   POST /timeline/cache/refresh - Refresh cache
+2026/02/12 15:04:47   GET /timeline/refresh/interval - Get adaptive refresh interval
+2026/02/12 15:04:47   POST /timeline/activity/update - Update user activity
+2026/02/12 15:04:47   GET/POST /timeline/server/load - Get/record server load

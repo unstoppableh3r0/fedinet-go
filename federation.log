@@ -1,0 +1,22 @@
+2026/02/12 15:04:46 DATABASE_URL loaded: postgresql://postgres:agileprocessmodel@db.usqvwow...
+2026/02/12 15:04:46 Federation database connected
+2026/02/12 15:04:46 Retry worker started
+2026/02/12 15:04:46 Expiration worker started
+2026/02/12 15:04:46 Federation server starting on :8081
+2026/02/12 15:04:46 Endpoints:
+2026/02/12 15:04:46   POST   /federation/inbox          - Receive incoming activities
+2026/02/12 15:04:46   GET    /federation/outbox         - Retrieve outgoing activities
+2026/02/12 15:04:46   POST   /federation/send           - Send an activity to remote server
+2026/02/12 15:04:46   POST   /federation/ack            - Receive delivery acknowledgments
+2026/02/12 15:04:46   GET    /federation/capabilities   - Get server capabilities
+2026/02/12 15:04:46   POST   /federation/discover       - Discover remote capabilities
+2026/02/12 15:04:46   GET    /federation/health         - Get instance health status
+2026/02/12 15:04:46   GET    /federation/admin/blocks   - List blocked servers
+2026/02/12 15:04:46 Health worker started
+2026/02/12 15:04:46   POST   /federation/admin/blocks   - Block a server
+2026/02/12 15:04:46   DELETE /federation/admin/blocks   - Unblock a server
+2026/02/12 15:04:46   GET    /federation/admin/mode     - Get federation mode
+2026/02/12 15:04:46   PUT    /federation/admin/mode     - Set federation mode
+2026/02/12 15:04:46   POST   /federation/admin/limits   - Configure rate limits
+2026/02/12 15:04:46 listen tcp :8081: bind: address already in use
+exit status 1

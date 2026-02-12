@@ -41,6 +41,7 @@ func main() {
 
 	// Public Status Routes (Always available)
 	http.HandleFunc("/status", StatusHandler)
+	http.HandleFunc("/health", HealthCheckHandler)
 	http.HandleFunc("/server/info", GetServerInfoHandler)
 
 	// User Routes (Protected by Init Check)

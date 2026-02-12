@@ -458,3 +458,13 @@ func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 		"posts": posts,
 	})
 }
+
+func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	// Optionally check if the DB is reachable
+	if err := db.Ping(); err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("healthy"))
+}

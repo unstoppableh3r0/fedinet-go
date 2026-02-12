@@ -1,0 +1,48 @@
+name: Full System CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-all-epics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Install Dependencies
+        run: go mod download
+
+      # Run Tests for all Epics
+      - name: Run Comprehensive Test Suite
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        # "go test ./..." runs tests across all internal packages (Identity, Federation, Privacy, Timeline, Moderation)
+        run: go test ./... -v
+
+      # Docker Build validation for all microservices
+      - name: Build Identity Service Container (Epic 1 & 3)
+        run: docker build -t fedinet-identity -f internal/identity/Dockerfile .
+
+      - name: Build Federation Service Container (Epic 2)
+        run: docker build -t fedinet-federation -f internal/federation/Dockerfile .
+      
+      - name: Build Timeline Service Container (Epic 4)
+        run: |
+          if [ -f internal/timeline/Dockerfile ]; then
+            docker build -t fedinet-timeline -f internal/timeline/Dockerfile .
+          fi
+
+      - name: Build Moderation Service Container (Epic 5)
+        run: |
+          if [ -f internal/moderation/Dockerfile ]; then
+            docker build -t fedinet-moderation -f internal/moderation/Dockerfile .
+          fi

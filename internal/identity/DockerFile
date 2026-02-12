@@ -1,12 +1,8 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25-alpine
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o federation ./internal/federation/main.go
-
-FROM alpine:latest
-WORKDIR /root/
-COPY --from=builder /app/federation .
-EXPOSE 8081
-CMD ["./federation"]
+RUN go build -o identity ./internal/identity/
+EXPOSE 8080
+CMD ["./identity"]

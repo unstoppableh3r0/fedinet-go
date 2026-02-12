@@ -12,3 +12,5 @@
 2026/02/12 15:04:47   GET /timeline/refresh/interval - Get adaptive refresh interval
 2026/02/12 15:04:47   POST /timeline/activity/update - Update user activity
 2026/02/12 15:04:47   GET/POST /timeline/server/load - Get/record server load
+2026/02/12 16:04:47 Running cache cleanup task...
+2026/02/12 16:04:48 Cleaned 0 expired cache entries

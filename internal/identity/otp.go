@@ -13,8 +13,8 @@ import (
 
 // OTP Configuration
 const (
-	OTPLength     = 6
-	OTPExpiry     = 5 * time.Minute
+	OTPLength      = 6
+	OTPExpiry      = 5 * time.Minute
 	MaxOTPAttempts = 3
 )
 
@@ -141,7 +141,20 @@ func SendOTPEmail(email, otpCode, purpose string) error {
 
 	// Validate SMTP configuration
 	if smtpHost == "" || smtpPort == "" || smtpUsername == "" || smtpPassword == "" {
-		return fmt.Errorf("SMTP configuration incomplete - check environment variables")
+		var missing []string
+		if smtpHost == "" {
+			missing = append(missing, "SMTP_HOST")
+		}
+		if smtpPort == "" {
+			missing = append(missing, "SMTP_PORT")
+		}
+		if smtpUsername == "" {
+			missing = append(missing, "SMTP_USERNAME")
+		}
+		if smtpPassword == "" {
+			missing = append(missing, "SMTP_PASSWORD")
+		}
+		return fmt.Errorf("SMTP configuration incomplete - missing: %v. Please configure SMTP environment variables to enable OTP emails", missing)
 	}
 
 	if smtpFrom == "" {
@@ -208,7 +221,8 @@ Federated Network Team
 
 	err := smtp.SendMail(addr, auth, smtpFrom, []string{email}, []byte(message))
 	if err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
+		log.Printf("SMTP Error: Failed to send email to %s via %s - %v", email, addr, err)
+		return fmt.Errorf("failed to send email to %s. Please check SMTP configuration and network connectivity: %w", email, err)
 	}
 
 	log.Printf("OTP email sent to %s (purpose: %s)", email, purpose)

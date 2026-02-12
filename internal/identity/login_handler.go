@@ -96,11 +96,12 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return session ID and masked email for OTP verification
+	// Return session ID, email, and masked email for OTP verification
 	maskedEmail := maskEmail(email)
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"message":      "OTP sent to your email",
 		"session_id":   sessionID,
+		"email":        email, // Actual email needed for OTP verification
 		"email_hint":   maskedEmail,
 		"expires_in":   int(OTPExpiry.Seconds()),
 		"requires_otp": true,

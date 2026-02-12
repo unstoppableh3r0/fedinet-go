@@ -7,3 +7,7 @@
 2026/02/12 15:14:48 Error cleaning up expired OTPs: pq: relation "otp_codes" does not exist
 2026/02/12 15:24:48 Error cleaning up expired OTPs: pq: relation "otp_codes" does not exist
 2026/02/12 15:34:48 Error cleaning up expired OTPs: pq: relation "otp_codes" does not exist
+2026/02/12 15:44:48 Error cleaning up expired OTPs: pq: relation "otp_codes" does not exist
+2026/02/12 15:54:48 Error cleaning up expired OTPs: pq: relation "otp_codes" does not exist
+2026/02/12 16:04:48 Error cleaning up expired tokens: pq: relation "refresh_tokens" does not exist
+2026/02/12 16:04:48 Error cleaning up expired OTPs: pq: relation "otp_codes" does not exist

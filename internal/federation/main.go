@@ -44,7 +44,7 @@ func main() {
 
 func registerHandlers() {
 	// Core federation endpoints
-	http.HandleFunc("/federation/inbox", InboxHandler)
+	http.HandleFunc("/federation/inbox", VerifySignatureMiddleware(InboxHandler))
 	http.HandleFunc("/federation/outbox", OutboxHandler)
 	http.HandleFunc("/federation/send", SendActivityHandler)
 	http.HandleFunc("/federation/ack", AcknowledgmentHandler)
@@ -54,7 +54,7 @@ func registerHandlers() {
 	http.HandleFunc("/federation/discover", DiscoverCapabilitiesHandler)
 
 	// Identity Lookup
-	http.HandleFunc("/federation/lookup", HandleFederatedLookup)
+	http.HandleFunc("/federation/lookup", VerifySignatureMiddleware(HandleFederatedLookup))
 
 	// Health endpoint
 	http.HandleFunc("/federation/health", HealthHandler)

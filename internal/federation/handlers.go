@@ -1,11 +1,171 @@
 package main
 
-import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"strings"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
+
+// ============================================================================
+// Epic 3: HTTP Signature Verification Middleware
+// ============================================================================
+
+// SignatureParams holds the parsed components of an HTTP Signature header.
+type SignatureParams struct {
+	KeyID     string
+	Algorithm string
+	Headers   []string
+	Signature string
+}
+
+// ParseSignatureHeader parses a Signature header value into its components.
+// Expected format: keyId="...",algorithm="...",headers="...",signature="..."
+func ParseSignatureHeader(header string) (*SignatureParams, error) {
+	params := &SignatureParams{}
+	parts := strings.Split(header, ",")
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "keyId=") {
+			params.KeyID = strings.Trim(strings.TrimPrefix(part, "keyId="), `"`)
+		} else if strings.HasPrefix(part, "algorithm=") {
+			params.Algorithm = strings.Trim(strings.TrimPrefix(part, "algorithm="), `"`)
+		} else if strings.HasPrefix(part, "headers=") {
+			headerList := strings.Trim(strings.TrimPrefix(part, "headers="), `"`)
+			params.Headers = strings.Split(headerList, " ")
+		} else if strings.HasPrefix(part, "signature=") {
+			params.Signature = strings.Trim(strings.TrimPrefix(part, "signature="), `"`)
+		}
+	}
+
+	if params.KeyID == "" || params.Signature == "" || len(params.Headers) == 0 {
+		return nil, fmt.Errorf("invalid signature header: missing required fields")
+	}
+	return params, nil
+}
+
+// FetchServerPublicKey retrieves the public key for a given keyId.
+// It first checks the local identities table, then falls back to federated lookup.
+func FetchServerPublicKey(keyID string) (string, error) {
+	// 1. Try local DB lookup (server_identity or identities table)
+	var publicKey string
+	err := db.QueryRow(
+		`SELECT public_key FROM identities WHERE user_id = $1`, keyID,
+	).Scan(&publicKey)
+	if err == nil && publicKey != "" {
+		return publicKey, nil
+	}
+
+	// 2. Try server_identity table (in case keyId is a server ID)
+	err = db.QueryRow(
+		`SELECT public_key FROM server_identity WHERE server_id = $1`, keyID,
+	).Scan(&publicKey)
+	if err == nil && publicKey != "" {
+		return publicKey, nil
+	}
+
+	// 3. Fallback: Resolve via federated lookup
+	doc, err := ResolveAccount(keyID)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch public key for %s: %w", keyID, err)
+	}
+	return doc.Identity.PublicKey, nil
+}
+
+// VerifySignatureMiddleware wraps an http.HandlerFunc to verify HTTP Signatures.
+// If verification fails, it returns 401 Unauthorized.
+func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sigHeader := r.Header.Get("Signature")
+		if sigHeader == "" {
+			sendError(w, http.StatusUnauthorized, "missing_signature",
+				"Missing Signature header", "")
+			return
+		}
+
+		// 1. Parse the Signature header
+		params, err := ParseSignatureHeader(sigHeader)
+		if err != nil {
+			sendError(w, http.StatusUnauthorized, "invalid_signature_header",
+				"Invalid Signature header format", err.Error())
+			return
+		}
+
+		// 2. Fetch the public key for the keyId
+		publicKey, err := FetchServerPublicKey(params.KeyID)
+		if err != nil {
+			sendError(w, http.StatusUnauthorized, "key_not_found",
+				"Could not find public key for sender", err.Error())
+			return
+		}
+
+		// 3. Read and restore the request body for digest computation
+		var bodyBytes []byte
+		if r.Body != nil {
+			bodyBytes, err = io.ReadAll(r.Body)
+			if err != nil {
+				sendError(w, http.StatusBadRequest, "body_read_error",
+					"Failed to read request body", err.Error())
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		}
+
+		// 4. Reconstruct the signing string from the declared headers
+		var signingParts []string
+		for _, h := range params.Headers {
+			switch h {
+			case "(request-target)":
+				requestTarget := strings.ToLower(r.Method) + " " + r.URL.RequestURI()
+				signingParts = append(signingParts, "(request-target): "+requestTarget)
+			case "host":
+				signingParts = append(signingParts, "host: "+r.Host)
+			case "date":
+				signingParts = append(signingParts, "date: "+r.Header.Get("Date"))
+			case "digest":
+				// Recompute digest from the body and compare
+				digest := sha256.Sum256(bodyBytes)
+				computedDigest := "SHA-256=" + hex.EncodeToString(digest[:])
+				receivedDigest := r.Header.Get("Digest")
+				if receivedDigest != computedDigest {
+					sendError(w, http.StatusUnauthorized, "digest_mismatch",
+						"Body digest does not match Digest header", "")
+					return
+				}
+				signingParts = append(signingParts, "digest: "+computedDigest)
+			default:
+				// Support any other standard header
+				signingParts = append(signingParts, h+": "+r.Header.Get(http.CanonicalHeaderKey(h)))
+			}
+		}
+		signingString := strings.Join(signingParts, "\n")
+
+		// 5. Verify the signature
+		valid, err := crypto.VerifySignature([]byte(signingString), params.Signature, publicKey)
+		if err != nil {
+			sendError(w, http.StatusUnauthorized, "verification_error",
+				"Signature verification failed", err.Error())
+			return
+		}
+		if !valid {
+			sendError(w, http.StatusUnauthorized, "invalid_signature",
+				"Signature is invalid", "")
+			return
+		}
+
+		log.Printf("✅ Signature verified for keyId=%s", params.KeyID)
+		next(w, r)
+	}
+}
 
 // ============================================================================
 // User Story 2.4: Inbox / Outbox Architecture

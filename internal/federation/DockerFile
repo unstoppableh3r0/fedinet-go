@@ -9,7 +9,5 @@ RUN go build -o federation ./internal/federation/
 FROM alpine:latest
 WORKDIR /root/
 COPY --from=builder /app/federation .
-# Ensure the .env file is available for the db connection
-COPY --from=builder /app/.env . 
 EXPOSE 8081
 CMD ["./federation"]

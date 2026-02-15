@@ -1,0 +1,99 @@
+version: "3.8"
+
+# =============================================================================
+# Fedinet Two-Server Federation Setup
+# =============================================================================
+# Server A: Identity on :8080, Federation on :8081
+# Server B: Identity on :9080, Federation on :9081
+#
+# Usage:
+#   docker-compose -f docker-compose.federation.yml up --build
+#
+# After startup:
+#   1. Initialize Server A: POST http://localhost:8080/initialize
+#   2. Initialize Server B: POST http://localhost:9080/initialize
+#   3. Run federation migrations (see README)
+# =============================================================================
+
+services:
+  # ── Shared Postgres with two databases ──
+  postgres:
+    image: postgres:15-alpine
+    container_name: fedinet_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-dbs.sql:/docker-entrypoint-initdb.d/init-dbs.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── SERVER A ──
+
+  server-a-identity:
+    build:
+      context: .
+      dockerfile: internal/identity/Dockerfile
+    container_name: server_a_identity
+    ports:
+      - "8080:8082"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_a?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  server-a-federation:
+    build:
+      context: .
+      dockerfile: internal/federation/Dockerfile
+    container_name: server_a_federation
+    ports:
+      - "8081:8081"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_a?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── SERVER B ──
+
+  server-b-identity:
+    build:
+      context: .
+      dockerfile: internal/identity/Dockerfile
+    container_name: server_b_identity
+    ports:
+      - "9080:8082"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_b?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  server-b-federation:
+    build:
+      context: .
+      dockerfile: internal/federation/Dockerfile
+    container_name: server_b_federation
+    ports:
+      - "9081:8081"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_b?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

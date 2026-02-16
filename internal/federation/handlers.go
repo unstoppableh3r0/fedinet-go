@@ -15,11 +15,11 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
-// ============================================================================
-// Epic 3: HTTP Signature Verification Middleware
-// ============================================================================
 
-// SignatureParams holds the parsed components of an HTTP Signature header.
+
+
+
+
 type SignatureParams struct {
 	KeyID     string
 	Algorithm string
@@ -27,8 +27,8 @@ type SignatureParams struct {
 	Signature string
 }
 
-// ParseSignatureHeader parses a Signature header value into its components.
-// Expected format: keyId="...",algorithm="...",headers="...",signature="..."
+
+
 func ParseSignatureHeader(header string) (*SignatureParams, error) {
 	params := &SignatureParams{}
 	parts := strings.Split(header, ",")
@@ -53,10 +53,10 @@ func ParseSignatureHeader(header string) (*SignatureParams, error) {
 	return params, nil
 }
 
-// FetchServerPublicKey retrieves the public key for a given keyId.
-// It checks: identities → trusted_servers → server_identity → remote resolve.
+
+
 func FetchServerPublicKey(keyID string) (string, error) {
-	// 1. Try local DB lookup (identities table)
+	
 	var publicKey string
 	err := db.QueryRow(
 		`SELECT public_key FROM identities WHERE user_id = $1`, keyID,
@@ -65,7 +65,7 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	// 2. Try trusted_servers table (peer keys from handshake)
+	
 	err = db.QueryRow(
 		`SELECT public_key FROM trusted_servers WHERE server_id = $1`, keyID,
 	).Scan(&publicKey)
@@ -74,7 +74,7 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	// 3. Try server_identity table (in case keyId is a server ID)
+	
 	err = db.QueryRow(
 		`SELECT public_key FROM server_identity WHERE server_id = $1`, keyID,
 	).Scan(&publicKey)
@@ -82,7 +82,7 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	// 4. Fallback: Resolve via federated lookup
+	
 	doc, err := ResolveAccount(keyID)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch public key for %s: %w", keyID, err)
@@ -90,8 +90,8 @@ func FetchServerPublicKey(keyID string) (string, error) {
 	return doc.Identity.PublicKey, nil
 }
 
-// VerifySignatureMiddleware wraps an http.HandlerFunc to verify HTTP Signatures.
-// If verification fails, it returns 401 Unauthorized.
+
+
 func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sigHeader := r.Header.Get("Signature")
@@ -101,7 +101,7 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 1. Parse the Signature header
+		
 		params, err := ParseSignatureHeader(sigHeader)
 		if err != nil {
 			sendError(w, http.StatusUnauthorized, "invalid_signature_header",
@@ -109,7 +109,7 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 2. Fetch the public key for the keyId
+		
 		publicKey, err := FetchServerPublicKey(params.KeyID)
 		if err != nil {
 			sendError(w, http.StatusUnauthorized, "key_not_found",
@@ -117,7 +117,7 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 3. Read and restore the request body for digest computation
+		
 		var bodyBytes []byte
 		if r.Body != nil {
 			bodyBytes, err = io.ReadAll(r.Body)
@@ -129,7 +129,7 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
 
-		// 4. Reconstruct the signing string from the declared headers
+		
 		var signingParts []string
 		for _, h := range params.Headers {
 			switch h {
@@ -141,7 +141,7 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			case "date":
 				signingParts = append(signingParts, "date: "+r.Header.Get("Date"))
 			case "digest":
-				// Recompute digest from the body and compare
+				
 				digest := sha256.Sum256(bodyBytes)
 				computedDigest := "SHA-256=" + hex.EncodeToString(digest[:])
 				receivedDigest := r.Header.Get("Digest")
@@ -152,13 +152,13 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				}
 				signingParts = append(signingParts, "digest: "+computedDigest)
 			default:
-				// Support any other standard header
+				
 				signingParts = append(signingParts, h+": "+r.Header.Get(http.CanonicalHeaderKey(h)))
 			}
 		}
 		signingString := strings.Join(signingParts, "\n")
 
-		// 5. Verify the signature
+		
 		valid, err := crypto.VerifySignature([]byte(signingString), params.Signature, publicKey)
 		if err != nil {
 			sendError(w, http.StatusUnauthorized, "verification_error",
@@ -176,11 +176,11 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ============================================================================
-// User Story 2.4: Inbox / Outbox Architecture
-// ============================================================================
 
-// InboxHandler receives incoming federated activities
+
+
+
+
 func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -193,19 +193,19 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
+	
 	if req.ActivityType == "" || req.Actor == "" || req.ActorServer == "" {
 		sendError(w, http.StatusBadRequest, "missing_fields", "Missing required fields", "")
 		return
 	}
 
-	// Verify Signature
+	
 	if err := VerifyRequestSignature(req); err != nil {
 		sendError(w, http.StatusUnauthorized, "invalid_signature", "Signature verification failed", err.Error())
 		return
 	}
 
-	// Process the inbound activity
+	
 	activityID, err := ProcessInboundActivity(
 		req.ActivityType,
 		req.Actor,
@@ -230,7 +230,7 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// OutboxHandler serves outgoing activities
+
 func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -243,7 +243,7 @@ func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default limit
+	
 	limit := 50
 
 	activities, err := GetOutboxActivities(actorID, limit)
@@ -259,7 +259,7 @@ func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SendActivityHandler initiates outbound federation
+
 func SendActivityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -302,11 +302,11 @@ func SendActivityHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ============================================================================
-// User Story 2.7: Delivery Acknowledgment
-// ============================================================================
 
-// AcknowledgmentHandler receives delivery confirmations
+
+
+
+
 func AcknowledgmentHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -333,11 +333,11 @@ func AcknowledgmentHandler(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, http.StatusOK, "Acknowledgment recorded", nil)
 }
 
-// ============================================================================
-// User Story 2.11: Capability Negotiation
-// ============================================================================
 
-// CapabilitiesHandler returns server capabilities
+
+
+
+
 func CapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -354,7 +354,7 @@ func CapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(caps)
 }
 
-// DiscoverCapabilitiesHandler discovers capabilities of a remote server
+
 func DiscoverCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -382,11 +382,11 @@ func DiscoverCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(caps)
 }
 
-// ============================================================================
-// User Story 2.14: Instance Health API
-// ============================================================================
 
-// HealthHandler returns instance health status
+
+
+
+
 func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -417,11 +417,11 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// ============================================================================
-// User Story 2.12: Blocked Server Lists (Admin Endpoints)
-// ============================================================================
 
-// BlockedServersHandler manages blocked servers
+
+
+
+
 func BlockedServersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -461,7 +461,7 @@ func handleBlockServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For now, assume admin is "system" - in production, get from auth
+	
 	err := BlockServer(req.ServerURL, req.Reason, "system", req.ExpiresAt)
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, "internal_error", "Failed to block server", err.Error())
@@ -491,11 +491,11 @@ func handleUnblockServer(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ============================================================================
-// User Story 2.13: Soft / Hard Federation Modes (Admin Endpoint)
-// ============================================================================
 
-// FederationModeHandler configures federation mode
+
+
+
+
 func FederationModeHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -541,11 +541,11 @@ func handleSetFederationMode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ============================================================================
-// User Story 2.8: Rate Limiting (Admin Endpoint)
-// ============================================================================
 
-// RateLimitsHandler manages rate limits
+
+
+
+
 func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -580,13 +580,13 @@ func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, http.StatusOK, "Rate limit configured", nil)
 }
 
-// ============================================================================
-// Federation Handshake — Automatic Key Exchange
-// ============================================================================
 
-// HandshakeHandler receives a handshake request from a remote server.
-// It stores the remote server's public key and returns this server's identity.
-// This endpoint is intentionally UNPROTECTED because it establishes initial trust.
+
+
+
+
+
+
 func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -611,7 +611,7 @@ func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store the remote server's key (upsert)
+	
 	_, err := db.Exec(`
 		INSERT INTO trusted_servers (server_id, server_name, public_key, endpoint)
 		VALUES ($1, $2, $3, $4)
@@ -629,7 +629,7 @@ func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("🤝 Handshake received from %s (%s)", req.ServerName, req.ServerID)
 
-	// Return this server's identity
+	
 	var localID, localName, localKey string
 	err = db.QueryRow(`SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1`).
 		Scan(&localID, &localName, &localKey)
@@ -646,8 +646,8 @@ func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// InitiateHandshakeHandler triggers a handshake with a remote server.
-// It sends this server's identity to the target and stores the response.
+
+
 func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -668,7 +668,7 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get this server's identity
+	
 	var localID, localName, localKey string
 	err := db.QueryRow(`SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1`).
 		Scan(&localID, &localName, &localKey)
@@ -678,7 +678,7 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the handshake payload
+	
 	payload := map[string]string{
 		"server_id":   localID,
 		"server_name": localName,
@@ -693,7 +693,7 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send handshake to the remote server
+	
 	targetURL := strings.TrimRight(req.TargetServer, "/") + "/federation/handshake"
 	log.Printf("🤝 Initiating handshake with %s", targetURL)
 
@@ -722,7 +722,7 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract the remote server's identity from the response data
+	
 	remoteID, _ := remoteResp.Data["server_id"].(string)
 	remoteName, _ := remoteResp.Data["server_name"].(string)
 	remoteKey, _ := remoteResp.Data["public_key"].(string)
@@ -733,7 +733,7 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store the remote server's key
+	
 	_, err = db.Exec(`
 		INSERT INTO trusted_servers (server_id, server_name, public_key, endpoint)
 		VALUES ($1, $2, $3, $4)
@@ -764,9 +764,9 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
+
+
+
 
 func sendSuccess(w http.ResponseWriter, statusCode int, message string, data map[string]interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -800,11 +800,11 @@ func sendError(w http.ResponseWriter, statusCode int, errorType, message, detail
 	log.Printf("Error [%s]: %s - %s", errorType, message, details)
 }
 
-// ============================================================================
-// User Story 1.2: Cross-Instance Account Discovery
-// ============================================================================
 
-// HandleFederatedLookup resolves a user handle to an identity
+
+
+
+
 func HandleFederatedLookup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -817,14 +817,14 @@ func HandleFederatedLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Logic to resolve identity
+	
 	doc, err := ResolveAccount(handle)
 	if err != nil {
 		if err.Error() == "identity not found" {
 			sendError(w, http.StatusNotFound, "not_found", "Identity not found", "")
 			return
 		}
-		// Check for other errors or return internal error
+		
 		sendError(w, http.StatusInternalServerError, "lookup_failed", "Failed to resolve identity", err.Error())
 		return
 	}

@@ -11,9 +11,9 @@ import (
 	"github.com/skip2/go-qrcode"
 )
 
-// ============================================================================
-// Types
-// ============================================================================
+
+
+
 
 type Invite struct {
 	ID          string     `json:"id"`
@@ -25,21 +25,21 @@ type Invite struct {
 	ExpiresAt   *time.Time `json:"expires_at"`
 	Revoked     bool       `json:"revoked"`
 	CreatedAt   time.Time  `json:"created_at"`
-	Metadata    string     `json:"metadata"` // JSON string
+	Metadata    string     `json:"metadata"` 
 }
 
 type GenerateInviteRequest struct {
-	InviteType string `json:"invite_type"` // "user" or "admin"
-	MaxUses    int    `json:"max_uses"`    // -1 for unlimited
-	ExpiresIn  int    `json:"expires_in"`  // Hours, 0 for no expiry
+	InviteType string `json:"invite_type"` 
+	MaxUses    int    `json:"max_uses"`    
+	ExpiresIn  int    `json:"expires_in"`  
 }
 
-// ============================================================================
-// Core Functions
-// ============================================================================
+
+
+
 
 func generateInviteCode() (string, error) {
-	b := make([]byte, 6) // 6 bytes = 8 base64 chars
+	b := make([]byte, 6) 
 	_, err := rand.Read(b)
 	if err != nil {
 		return "", err
@@ -129,14 +129,14 @@ func ValidateInvite(code string) (*Invite, error) {
 }
 
 func UseInvite(code string, userID string, ip string, userAgent string) error {
-	// Start transaction
+	
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// 1. Get invite ID and verify valid for use (locked)
+	
 	var inviteID string
 	err = tx.QueryRow(`
 		SELECT id FROM invites WHERE invite_code = $1 FOR UPDATE
@@ -145,7 +145,7 @@ func UseInvite(code string, userID string, ip string, userAgent string) error {
 		return err
 	}
 
-	// 2. Increment usage
+	
 	_, err = tx.Exec(`
 		UPDATE invites SET current_uses = current_uses + 1 WHERE id = $1
 	`, inviteID)
@@ -153,7 +153,7 @@ func UseInvite(code string, userID string, ip string, userAgent string) error {
 		return err
 	}
 
-	// 3. Record usage
+	
 	_, err = tx.Exec(`
 		INSERT INTO invite_usage (invite_id, user_id, ip_address, user_agent)
 		VALUES ($1, $2, $3, $4)
@@ -206,18 +206,18 @@ func ListInvites() ([]Invite, error) {
 	return invites, nil
 }
 
-// ============================================================================
-// QR Generation
-// ============================================================================
+
+
+
 
 func GenerateInviteQR(code string) ([]byte, error) {
-	// Verify invite exists
+	
 	invite, err := ValidateInvite(code)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get server info
+	
 	var serverID, serverName, publicKey string
 	err = db.QueryRow("SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1").
 		Scan(&serverID, &serverName, &publicKey)
@@ -225,9 +225,9 @@ func GenerateInviteQR(code string) ([]byte, error) {
 		return nil, err
 	}
 
-	// Create payload
+	
 	payload := map[string]string{
-		"server_url":  "http://localhost:8082", // Ideally dynamic from config
+		"server_url":  "http://localhost:8082", 
 		"server_id":   serverID,
 		"server_name": serverName,
 		"public_key":  publicKey,
@@ -241,6 +241,6 @@ func GenerateInviteQR(code string) ([]byte, error) {
 		return nil, err
 	}
 
-	// Generate QR
+	
 	return qrcode.Encode(string(jsonData), qrcode.Medium, 256)
 }

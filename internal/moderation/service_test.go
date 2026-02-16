@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// --------------------
-// Mock Repository
-// --------------------
+
+
+
 
 type MockRepository struct {
 	CreateReportFn           func(*models.Report) error
@@ -41,9 +41,9 @@ func (m *MockRepository) EnqueueFederationEvent(e *models.FederationEvent) error
 	return m.EnqueueFederationEventFn(e)
 }
 
-// --------------------
-// Tests
-// --------------------
+
+
+
 
 func TestSubmitReport_Local(t *testing.T) {
 	mockRepo := &MockRepository{

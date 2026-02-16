@@ -1,0 +1,20 @@
+```mermaid
+sequenceDiagram
+    participant U as User (Server A)
+    participant FA as Frontend A
+    participant BA as Backend A
+    participant BB as Backend B
+    
+    U->>FA: Search "bob@server-b"
+    FA->>FA: Detect federated query (@)
+    FA->>BA: GET /api/search?q=bob@server-b
+    BA->>BA: Parse: username=bob, server=server-b
+    BA->>BA: Query trusted_servers for server-b
+    BA->>BA: Sign request with Ed25519
+    BA->>BB: GET /api/users/bob<br/>(with X-Server-ID, X-Signature headers)
+    BB->>BB: Verify signature<br/>(uses Server A's public key)
+    BB->>BB: Query local database for bob
+    BB-->>BA: Return public profile
+    BA-->>FA: Return federated user data
+    FA-->>U: Display Bob's profile
+```

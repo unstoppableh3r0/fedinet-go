@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// Mock DB or dependencies would be needed for a true unit test of the handler
-// since it calls GetIdentityByUserID and interacts with DB.
-// However, we can at least test the request validation logic.
+
+
+
 
 func TestRecoverAccountHandler_Validation(t *testing.T) {
 	tests := []struct {

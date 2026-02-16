@@ -9,7 +9,7 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
 
-// RecoverAccountHandler handles account recovery using a recovery key
+
 func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -31,10 +31,10 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Normalize ID
+	
 	internalID := ToInternalID(req.UserID)
 
-	// 1. Fetch models.Identity securely
+	
 	identity, err := GetIdentityByUserID(internalID)
 	if err != nil {
 		log.Println("Recovery lookup error:", err)
@@ -46,9 +46,9 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Verify Recovery Key
-	// GenerateRecoveryKey uses sha256 of the hex key string.
-	// We verify by hashing the input and comparing.
+	
+	
+	
 	inputHash := crypto.HashString(req.RecoveryKey)
 
 	if inputHash != identity.RecoveryKeyHash {
@@ -57,14 +57,14 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Rotate Keys
+	
 	newPubKey, newPrivKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "key generation failed")
 		return
 	}
 
-	// Encrypt new private key
+	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
 		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -75,14 +75,14 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate NEW recovery key
+	
 	newRecoveryKey, newRecoveryHash, err := crypto.GenerateRecoveryKey()
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "recovery key generation failed")
 		return
 	}
 
-	// 4. Update DB Transaction
+	
 	tx, err := db.Begin()
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "db error")
@@ -90,8 +90,8 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Revoke old key
-	// We insert into key_revocations. Signature is empty as it is a server/recovery action.
+	
+	
 	_, err = tx.Exec(`
 		INSERT INTO key_revocations (key_id, identity_id, reason, revoked_at, signature)
 		VALUES ($1, $2, 'account_recovery', NOW(), '')
@@ -103,7 +103,7 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update models.Identity
+	
 	_, err = tx.Exec(`
 		UPDATE identities 
 		SET public_key=$1, private_key=$2, key_version=key_version+1, recovery_key_hash=$3, updated_at=NOW()
@@ -121,7 +121,7 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Return new secrets
+	
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"message":          "account recovered successfully",
 		"new_private_key":  newPrivKey,

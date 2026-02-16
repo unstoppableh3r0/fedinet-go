@@ -47,6 +47,7 @@ services:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: password123
       JWT_SECRET: fedinet-dev-secret-key-server-a
+      SERVER_URL: http://localhost:8080
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,6 +81,7 @@ services:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: password123
       JWT_SECRET: fedinet-dev-secret-key-server-b
+      SERVER_URL: http://localhost:9080
     depends_on:
       postgres:
         condition: service_healthy

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// ValidateRankingMode checks if a ranking mode is valid
+
 func ValidateRankingMode(mode RankingMode) error {
 	switch mode {
 	case RankingModeChronological, RankingModePopular, RankingModeRelevance, RankingModeTrending:
@@ -15,7 +15,7 @@ func ValidateRankingMode(mode RankingMode) error {
 	}
 }
 
-// FormatDuration formats duration in a human-readable way
+
 func FormatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
@@ -25,12 +25,12 @@ func FormatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
-// CalculateEngagementScore computes a simple engagement score
+
 func CalculateEngagementScore(likeCount, replyCount, repostCount int) int {
 	return likeCount + (replyCount * 2) + (repostCount * 3)
 }
 
-// TimeAgo returns a human-readable time difference
+
 func TimeAgo(t time.Time) string {
 	duration := time.Since(t)
 
@@ -61,12 +61,12 @@ func pluralize(count int) string {
 	return "s"
 }
 
-// IsWithinTimeWindow checks if a time is within a duration from now
+
 func IsWithinTimeWindow(t time.Time, window time.Duration) bool {
 	return time.Since(t) <= window
 }
 
-// TruncateContent truncates content to a maximum length
+
 func TruncateContent(content string, maxLength int) string {
 	if len(content) <= maxLength {
 		return content
@@ -74,17 +74,17 @@ func TruncateContent(content string, maxLength int) string {
 	return content[:maxLength-3] + "..."
 }
 
-// GetDefaultPageSize returns the default page size for pagination
+
 func GetDefaultPageSize() int {
 	return 50
 }
 
-// GetMaxPageSize returns the maximum allowed page size
+
 func GetMaxPageSize() int {
 	return 200
 }
 
-// EnforcePageSize ensures page size is within valid bounds
+
 func EnforcePageSize(size int) int {
 	if size <= 0 {
 		return GetDefaultPageSize()

@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// TimelineError represents errors specific to timeline operations
+
 type TimelineError struct {
 	Code    string
 	Message string
@@ -22,7 +22,7 @@ func (e *TimelineError) Unwrap() error {
 	return e.Err
 }
 
-// Error codes
+
 const (
 	ErrCodeInvalidRankingMode = "INVALID_RANKING_MODE"
 	ErrCodeVersionNotFound    = "VERSION_NOT_FOUND"
@@ -32,7 +32,7 @@ const (
 	ErrCodeServerOverloaded   = "SERVER_OVERLOADED"
 )
 
-// NewTimelineError creates a new timeline error
+
 func NewTimelineError(code, message string, err error) *TimelineError {
 	return &TimelineError{
 		Code:    code,

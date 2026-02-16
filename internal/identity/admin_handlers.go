@@ -7,19 +7,19 @@ import (
 	"strings"
 )
 
-// ============ Admin Authentication Middleware ============
 
-// AdminAuthMiddleware validates JWT token for admin routes
+
+
 func AdminAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get token from Authorization header
+		
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			RespondWithError(w, http.StatusUnauthorized, "missing authorization header")
 			return
 		}
 
-		// Extract token from "Bearer <token>"
+		
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			RespondWithError(w, http.StatusUnauthorized, "invalid authorization header format")
@@ -28,7 +28,7 @@ func AdminAuthMiddleware(next http.Handler) http.Handler {
 
 		tokenString := parts[1]
 
-		// Validate token
+		
 		claims, err := ValidateJWT(tokenString)
 		if err != nil {
 			RespondWithError(w, http.StatusUnauthorized, "invalid or expired token")
@@ -40,14 +40,14 @@ func AdminAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Token is valid, proceed to handler
+		
 		next.ServeHTTP(w, r)
 	})
 }
 
-// ============ Admin Handlers ============
 
-// AdminLoginHandler handles admin login
+
+
 func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -60,13 +60,13 @@ func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate credentials
+	
 	if !ValidateAdminCredentials(req.Username, req.Password) {
 		RespondWithError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
-	// Generate JWT token
+	
 	token, err := GenerateJWT(req.Username)
 	if err != nil {
 		log.Println("Failed to generate JWT:", err)
@@ -74,14 +74,14 @@ func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return token
+	
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"token":   token,
 		"message": "login successful",
 	})
 }
 
-// GetServerConfigHandler retrieves current server configuration
+
 func GetServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -98,7 +98,7 @@ func GetServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, config)
 }
 
-// UpdateServerConfigHandler updates server configuration
+
 func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -119,12 +119,12 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract admin username from JWT (already validated by middleware)
+	
 	authHeader := r.Header.Get("Authorization")
 	tokenString := strings.Split(authHeader, " ")[1]
 	claims, _ := ValidateJWT(tokenString)
 
-	// Update server name
+	
 	err := UpdateServerName(req.ServerName, claims.Username)
 	if err != nil {
 		log.Println("Failed to update server name:", err)
@@ -138,7 +138,7 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// TestDatabaseHandler tests a database connection
+
 func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -159,7 +159,7 @@ func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Test connection
+	
 	err := TestDatabaseConnection(req.ConnectionString)
 	if err != nil {
 		RespondWithJSON(w, http.StatusBadRequest, map[string]string{
@@ -175,7 +175,7 @@ func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// StartMigrationHandler initiates database migration
+
 func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -193,14 +193,14 @@ func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Test connection first
+	
 	err := TestDatabaseConnection(req.NewConnectionString)
 	if err != nil {
 		RespondWithError(w, http.StatusBadRequest, "cannot connect to new database: "+err.Error())
 		return
 	}
 
-	// Start migration
+	
 	migrationID, err := MigrateDatabase(req.NewConnectionString)
 	if err != nil {
 		log.Println("Failed to start migration:", err)
@@ -215,7 +215,7 @@ func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetMigrationStatusHandler retrieves migration status
+
 func GetMigrationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -238,7 +238,7 @@ func GetMigrationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, status)
 }
 
-// GetAllUsersHandler retrieves all users
+
 func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -258,7 +258,7 @@ func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetStatsHandler retrieves server statistics
+
 func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -275,17 +275,7 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, stats)
 }
 
-// ============ User Notification Handlers ============
-// NOTE: Replaced by notification_handlers.go
 
-/*
-// GetUserNotificationsHandler retrieves notifications for a user
-func GetUserNotificationsHandler(w http.ResponseWriter, r *http.Request) {
-    ...
-}
 
-// MarkNotificationReadHandler marks a notification as read
-func MarkNotificationReadHandler(w http.ResponseWriter, r *http.Request) {
-    ...
-}
-*/
+
+

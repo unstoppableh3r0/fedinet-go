@@ -6,7 +6,7 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
-// GetFeedPosts returns posts from users that the specified user follows
+
 func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 	query := `
 		SELECT 
@@ -56,7 +56,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 	return posts, rows.Err()
 }
 
-// GetFollowers returns list of users following the specified user
+
 func GetFollowers(userID string) ([]models.UserDocument, error) {
 	query := `
 		SELECT f.follower_user_id
@@ -79,7 +79,7 @@ func GetFollowers(userID string) ([]models.UserDocument, error) {
 			continue
 		}
 
-		// Get full user document for each follower
+		
 		identity, err := GetIdentityByUserID(followerID)
 		if err != nil {
 			log.Printf("Error getting identity for follower %s: %v", followerID, err)
@@ -101,7 +101,7 @@ func GetFollowers(userID string) ([]models.UserDocument, error) {
 	return followers, rows.Err()
 }
 
-// GetFollowing returns list of users that the specified user follows
+
 func GetFollowing(userID string) ([]models.UserDocument, error) {
 	query := `
 		SELECT f.followee_user_id
@@ -124,7 +124,7 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 			continue
 		}
 
-		// Get full user document for each followee
+		
 		identity, err := GetIdentityByUserID(followeeID)
 		if err != nil {
 			log.Printf("Error getting identity for followee %s: %v", followeeID, err)
@@ -146,7 +146,7 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 	return following, rows.Err()
 }
 
-// GetConversations returns list of recent conversations for a user
+
 func GetConversations(userID string) ([]models.Message, error) {
 	query := `
 		WITH latest_messages AS (
@@ -192,7 +192,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 	return conversations, rows.Err()
 }
 
-// GetConversationMessages returns all messages between two users
+
 func GetConversationMessages(userID, otherUserID string) ([]models.Message, error) {
 	query := `
 		SELECT id, sender_id, recipient_id, content, created_at

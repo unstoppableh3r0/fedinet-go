@@ -15,13 +15,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// ============================================================================
-// User Story 2.3: Secure Delivery with Retries
-// ============================================================================
 
-// SendFederatedActivity sends an activity to a remote server with retry support
+
+
+
+
 func SendFederatedActivity(activityID uuid.UUID, targetServer string, payload map[string]interface{}) error {
-	// Check if server is blocked
+	
 	blocked, err := IsServerBlocked(targetServer)
 	if err != nil {
 		return fmt.Errorf("failed to check block status: %w", err)
@@ -30,13 +30,13 @@ func SendFederatedActivity(activityID uuid.UUID, targetServer string, payload ma
 		return fmt.Errorf("server is blocked: %s", targetServer)
 	}
 
-	// Get federation mode
+	
 	mode, err := GetFederationMode()
 	if err != nil {
 		return fmt.Errorf("failed to get federation mode: %w", err)
 	}
 
-	// In hard mode, check if we know this server
+	
 	if mode == "hard" {
 		known, err := IsKnownServer(targetServer)
 		if err != nil {
@@ -47,23 +47,23 @@ func SendFederatedActivity(activityID uuid.UUID, targetServer string, payload ma
 		}
 	}
 
-	// Attempt delivery
+	
 	err = DeliverWithRetry(activityID, targetServer, payload, 1)
 	if err != nil {
-		// Queue for retry
+		
 		return QueueForRetry(activityID, err.Error())
 	}
 
 	return nil
 }
 
-// DeliverWithRetry implements exponential backoff retry logic
+
 func DeliverWithRetry(messageID uuid.UUID, targetServer string, payload map[string]interface{}, attemptNumber int) error {
-	// Create federation message
+	
 	message := models.FederationRequest{
 		Version: "1.0.0",
 		Type:    "activity",
-		Sender:  "http://localhost:8081", // Should come from config
+		Sender:  "http://localhost:8081", 
 		Payload: payload,
 	}
 
@@ -72,7 +72,7 @@ func DeliverWithRetry(messageID uuid.UUID, targetServer string, payload map[stri
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
-	// Send HTTP request
+	
 	resp, err := http.Post(
 		targetServer+"/federation/inbox",
 		"application/json",
@@ -89,7 +89,7 @@ func DeliverWithRetry(messageID uuid.UUID, targetServer string, payload map[stri
 		return fmt.Errorf("delivery failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Mark as delivered
+	
 	_, err = db.Exec(`
 		UPDATE outbox_activities
 		SET delivery_status = 'delivered', delivered_at = NOW(), updated_at = NOW()
@@ -99,9 +99,9 @@ func DeliverWithRetry(messageID uuid.UUID, targetServer string, payload map[stri
 	return err
 }
 
-// QueueForRetry adds a failed message to the retry queue
+
 func QueueForRetry(messageID uuid.UUID, errorMsg string) error {
-	// Get current attempt count
+	
 	var attempts int
 	err := db.QueryRow(`
 		SELECT COALESCE(MAX(attempt_number), 0)
@@ -116,9 +116,9 @@ func QueueForRetry(messageID uuid.UUID, errorMsg string) error {
 	nextAttempt := attempts + 1
 	maxRetries := 6
 
-	// Check if we've exceeded max retries
+	
 	if nextAttempt > maxRetries {
-		// Mark as expired
+		
 		_, err = db.Exec(`
 			UPDATE outbox_activities
 			SET delivery_status = 'expired', error_message = $2, updated_at = NOW()
@@ -127,11 +127,11 @@ func QueueForRetry(messageID uuid.UUID, errorMsg string) error {
 		return err
 	}
 
-	// Calculate backoff: 30s, 1m, 5m, 15m, 1h, 6h
+	
 	backoffSeconds := calculateBackoff(nextAttempt)
 	nextRetryAt := time.Now().Add(time.Duration(backoffSeconds) * time.Second)
 
-	// Insert retry attempt
+	
 	_, err = db.Exec(`
 		INSERT INTO delivery_attempts 
 		(message_id, attempt_number, status, error_message, next_retry_at, backoff_seconds)
@@ -141,17 +141,17 @@ func QueueForRetry(messageID uuid.UUID, errorMsg string) error {
 	return err
 }
 
-// calculateBackoff returns backoff duration in seconds
+
 func calculateBackoff(attempt int) int {
-	// Exponential backoff: 30, 60, 300, 900, 3600, 21600
+	
 	backoffs := []int{30, 60, 300, 900, 3600, 21600}
 	if attempt <= len(backoffs) {
 		return backoffs[attempt-1]
 	}
-	return 21600 // 6 hours max
+	return 21600 
 }
 
-// ExpireOldMessages removes messages that have exceeded retry limits
+
 func ExpireOldMessages() error {
 	expirationTime := time.Now().Add(-24 * time.Hour)
 
@@ -165,7 +165,7 @@ func ExpireOldMessages() error {
 	return err
 }
 
-// ProcessRetryQueue processes pending retries
+
 func ProcessRetryQueue() error {
 	rows, err := db.Query(`
 		SELECT da.message_id, oa.target_server, oa.payload, da.attempt_number
@@ -193,28 +193,28 @@ func ProcessRetryQueue() error {
 			continue
 		}
 
-		// Parse payload
+		
 		var payload map[string]interface{}
 		if err := json.Unmarshal([]byte(payloadStr), &payload); err != nil {
 			log.Printf("Error parsing payload: %v", err)
 			continue
 		}
 
-		// Attempt delivery
+		
 		err = DeliverWithRetry(messageID, targetServer, payload, attemptNumber)
 
 		if err != nil {
-			// Mark attempt as failed and queue next retry
+			
 			QueueForRetry(messageID, err.Error())
 
-			// Update this attempt status
+			
 			db.Exec(`
 				UPDATE delivery_attempts
 				SET status = 'failed', updated_at = NOW()
 				WHERE message_id = $1 AND attempt_number = $2
 			`, messageID, attemptNumber)
 		} else {
-			// Mark attempt as success
+			
 			db.Exec(`
 				UPDATE delivery_attempts
 				SET status = 'success', updated_at = NOW()
@@ -226,13 +226,13 @@ func ProcessRetryQueue() error {
 	return rows.Err()
 }
 
-// ============================================================================
-// User Story 2.4: Inbox / Outbox Architecture
-// ============================================================================
 
-// ProcessInboundActivity validates and stores incoming activities
+
+
+
+
 func ProcessInboundActivity(activityType, actorID, actorServer string, targetID *string, payload map[string]interface{}) (uuid.UUID, error) {
-	// Check if sender server is blocked
+	
 	blocked, err := IsServerBlocked(actorServer)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to check block status: %w", err)
@@ -241,7 +241,7 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 		return uuid.Nil, fmt.Errorf("sender server is blocked")
 	}
 
-	// Check rate limit
+	
 	allowed, err := CheckRateLimit(actorServer, "/federation/inbox")
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("rate limit check failed: %w", err)
@@ -250,7 +250,7 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 		return uuid.Nil, fmt.Errorf("rate limit exceeded")
 	}
 
-	// Check if target has blocked the actor (User-to-User Block Enforcement)
+	
 	if targetID != nil {
 		blocked, err := IsUserBlocked(*targetID, actorID)
 		if err != nil {
@@ -261,13 +261,13 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 		}
 	}
 
-	// Serialize payload
+	
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	// Insert into inbox
+	
 	var activityID uuid.UUID
 	err = db.QueryRow(`
 		INSERT INTO inbox_activities
@@ -280,12 +280,12 @@ func ProcessInboundActivity(activityType, actorID, actorServer string, targetID 
 		return uuid.Nil, err
 	}
 
-	// Send acknowledgment
+	
 	go SendAcknowledgment(activityID, actorServer, "received", nil)
 
-	// Dispatch for processing (async or sync?)
-	// For MVP, lets do it in background to avoid blocking response,
-	// but typically we might want to know if it failed validity checks beyond signature.
+	
+	
+	
 	go func() {
 		activity := models.InboxActivity{
 			ID:           activityID,
@@ -306,7 +306,7 @@ func DispatchActivity(activity *models.InboxActivity) {
 	switch activity.ActivityType {
 	case "Update":
 		err = HandleProfileUpdate(activity)
-		// Add other cases here
+		
 	}
 
 	status := "processed"
@@ -318,20 +318,20 @@ func DispatchActivity(activity *models.InboxActivity) {
 		log.Printf("Failed to process activity %s: %v", activity.ID, err)
 	}
 
-	// Update status
+	
 	db.Exec(`UPDATE inbox_activities SET status=$1, error_message=$2, processed_at=NOW() WHERE id=$3`,
 		status, errMsg, activity.ID)
 }
 
-// PublishOutboundActivity creates and queues outbound activities
+
 func PublishOutboundActivity(activityType, actorID, targetServer string, targetID *string, payload map[string]interface{}) (uuid.UUID, error) {
-	// Serialize payload
+	
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	// Insert into outbox
+	
 	var activityID uuid.UUID
 	err = db.QueryRow(`
 		INSERT INTO outbox_activities
@@ -344,7 +344,7 @@ func PublishOutboundActivity(activityType, actorID, targetServer string, targetI
 		return uuid.Nil, err
 	}
 
-	// Attempt immediate delivery (async)
+	
 	go func() {
 		err := SendFederatedActivity(activityID, targetServer, payload)
 		if err != nil {
@@ -355,7 +355,7 @@ func PublishOutboundActivity(activityType, actorID, targetServer string, targetI
 	return activityID, nil
 }
 
-// GetInboxActivities retrieves inbox activities for a target
+
 func GetInboxActivities(targetID string, limit int) ([]models.InboxActivity, error) {
 	rows, err := db.Query(`
 		SELECT id, activity_type, actor_id, actor_server, target_id, payload,
@@ -388,7 +388,7 @@ func GetInboxActivities(targetID string, limit int) ([]models.InboxActivity, err
 	return activities, rows.Err()
 }
 
-// GetOutboxActivities retrieves outbox activities for an actor
+
 func GetOutboxActivities(actorID string, limit int) ([]models.OutboxActivity, error) {
 	rows, err := db.Query(`
 		SELECT id, activity_type, actor_id, target_server, target_id, payload,
@@ -422,11 +422,11 @@ func GetOutboxActivities(actorID string, limit int) ([]models.OutboxActivity, er
 	return activities, rows.Err()
 }
 
-// ============================================================================
-// User Story 2.7: Delivery Acknowledgment
-// ============================================================================
 
-// SendAcknowledgment sends a delivery confirmation
+
+
+
+
 func SendAcknowledgment(messageID uuid.UUID, receiverServer string, status string, reason *string) error {
 	ack := models.AcknowledgmentRequest{
 		MessageID: messageID,
@@ -454,7 +454,7 @@ func SendAcknowledgment(messageID uuid.UUID, receiverServer string, status strin
 	return nil
 }
 
-// TrackDeliveryState updates delivery status for outbound messages
+
 func TrackDeliveryState(messageID uuid.UUID, status string, reason *string) error {
 	_, err := db.Exec(`
 		INSERT INTO delivery_acknowledgments
@@ -462,7 +462,7 @@ func TrackDeliveryState(messageID uuid.UUID, status string, reason *string) erro
 		VALUES ($1, 'http://localhost:8081', 'remote', $2, $3)
 	`, messageID, status, reason)
 
-	// Also update outbox if acknowledged
+	
 	if status == "processed" {
 		db.Exec(`
 			UPDATE outbox_activities
@@ -474,15 +474,15 @@ func TrackDeliveryState(messageID uuid.UUID, status string, reason *string) erro
 	return err
 }
 
-// ============================================================================
-// User Story 2.8: Rate Limiting
-// ============================================================================
 
-// CheckRateLimit validates request against limits
+
+
+
+
 func CheckRateLimit(serverURL, endpoint string) (bool, error) {
 	now := time.Now()
 
-	// Try specific server+endpoint, then server+wildcard, then wildcard
+	
 	var currentCount, requestsPerMin, burstAllowance int
 	var windowStartedAt time.Time
 
@@ -500,16 +500,16 @@ func CheckRateLimit(serverURL, endpoint string) (bool, error) {
 	`, serverURL, endpoint).Scan(&currentCount, &requestsPerMin, &burstAllowance, &windowStartedAt)
 
 	if err == sql.ErrNoRows {
-		// No rate limit configured, allow
+		
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
 
-	// Check if window expired (1 minute)
+	
 	if now.Sub(windowStartedAt) > time.Minute {
-		// Reset window
+		
 		_, err = db.Exec(`
 			UPDATE rate_limits
 			SET current_count = 1, window_started_at = NOW(), last_request_at = NOW(), updated_at = NOW()
@@ -518,16 +518,16 @@ func CheckRateLimit(serverURL, endpoint string) (bool, error) {
 		return true, err
 	}
 
-	// Check limit
+	
 	if currentCount >= requestsPerMin+burstAllowance {
 		return false, nil
 	}
 
-	// Increment counter
+	
 	return IncrementRateLimiter(serverURL, endpoint)
 }
 
-// IncrementRateLimiter updates rate limit counters
+
 func IncrementRateLimiter(serverURL, endpoint string) (bool, error) {
 	_, err := db.Exec(`
 		UPDATE rate_limits
@@ -542,7 +542,7 @@ func IncrementRateLimiter(serverURL, endpoint string) (bool, error) {
 	return true, nil
 }
 
-// GetRateLimitForServer retrieves server-specific limits
+
 func GetRateLimitForServer(serverURL, endpoint string) (*models.RateLimit, error) {
 	var rl models.RateLimit
 
@@ -564,11 +564,11 @@ func GetRateLimitForServer(serverURL, endpoint string) (*models.RateLimit, error
 	return &rl, nil
 }
 
-// ============================================================================
-// User Story 2.11: Capability Negotiation
-// ============================================================================
 
-// AdvertiseCapabilities returns local server capabilities
+
+
+
+
 func AdvertiseCapabilities() (*models.ServerCapabilities, error) {
 	protocolVersions, _ := json.Marshal([]string{"1.0.0"})
 	supportedTypes, _ := json.Marshal([]string{"Follow", "Like", "Post", "Message"})
@@ -579,7 +579,7 @@ func AdvertiseCapabilities() (*models.ServerCapabilities, error) {
 		ServerURL:        "http://localhost:8081",
 		ProtocolVersions: string(protocolVersions),
 		SupportedTypes:   string(supportedTypes),
-		MaxMessageSize:   1048576, // 1MB
+		MaxMessageSize:   1048576, 
 		SupportsRetries:  true,
 		SupportsAcks:     true,
 		RateLimitInfo:    stringPtr(string(rateLimitInfo)),
@@ -591,9 +591,9 @@ func AdvertiseCapabilities() (*models.ServerCapabilities, error) {
 	return caps, nil
 }
 
-// DiscoverRemoteCapabilities fetches remote server capabilities
+
 func DiscoverRemoteCapabilities(serverURL string) (*models.ServerCapabilities, error) {
-	// Check cache first
+	
 	var caps models.ServerCapabilities
 	err := db.QueryRow(`
 		SELECT id, server_url, protocol_versions, supported_types, max_message_size,
@@ -610,11 +610,11 @@ func DiscoverRemoteCapabilities(serverURL string) (*models.ServerCapabilities, e
 	)
 
 	if err == nil {
-		// Cache hit
+		
 		return &caps, nil
 	}
 
-	// Fetch from remote
+	
 	resp, err := http.Get(serverURL + "/federation/capabilities")
 	if err != nil {
 		return nil, err
@@ -630,7 +630,7 @@ func DiscoverRemoteCapabilities(serverURL string) (*models.ServerCapabilities, e
 		return nil, err
 	}
 
-	// Cache the capabilities
+	
 	_, err = db.Exec(`
 		INSERT INTO server_capabilities
 		(server_url, protocol_versions, supported_types, max_message_size,
@@ -652,7 +652,7 @@ func DiscoverRemoteCapabilities(serverURL string) (*models.ServerCapabilities, e
 	return &caps, err
 }
 
-// IsKnownServer checks if we have capability info for a server
+
 func IsKnownServer(serverURL string) (bool, error) {
 	var exists bool
 	err := db.QueryRow(`
@@ -662,11 +662,11 @@ func IsKnownServer(serverURL string) (bool, error) {
 	return exists, err
 }
 
-// ============================================================================
-// User Story 2.12: Blocked Server Lists
-// ============================================================================
 
-// IsServerBlocked checks if a server is on the blocklist
+
+
+
+
 func IsServerBlocked(serverURL string) (bool, error) {
 	var blocked bool
 	err := db.QueryRow(`
@@ -681,7 +681,7 @@ func IsServerBlocked(serverURL string) (bool, error) {
 	return blocked, err
 }
 
-// BlockServer adds a server to the blocklist
+
 func BlockServer(serverURL, reason, blockedBy string, expiresAt *time.Time) error {
 	_, err := db.Exec(`
 		INSERT INTO blocked_servers (server_url, reason, blocked_by, expires_at, is_active)
@@ -698,7 +698,7 @@ func BlockServer(serverURL, reason, blockedBy string, expiresAt *time.Time) erro
 	return err
 }
 
-// UnblockServer removes a server from the blocklist
+
 func UnblockServer(serverURL string) error {
 	_, err := db.Exec(`
 		UPDATE blocked_servers
@@ -709,7 +709,7 @@ func UnblockServer(serverURL string) error {
 	return err
 }
 
-// GetBlockedServers retrieves all active blocks
+
 func GetBlockedServers() ([]models.FederationBlockedServer, error) {
 	rows, err := db.Query(`
 		SELECT id, server_url, reason, blocked_by, blocked_at, expires_at, is_active, created_at, updated_at
@@ -737,21 +737,21 @@ func GetBlockedServers() ([]models.FederationBlockedServer, error) {
 	return servers, rows.Err()
 }
 
-// ============================================================================
-// User Story 2.13: Soft / Hard Federation Modes
-// ============================================================================
 
-// GetFederationMode returns the current mode
+
+
+
+
 func GetFederationMode() (string, error) {
 	var mode string
 	err := db.QueryRow(`SELECT mode FROM federation_config ORDER BY created_at DESC LIMIT 1`).Scan(&mode)
 	if err != nil {
-		return "soft", err // Default to soft
+		return "soft", err 
 	}
 	return mode, nil
 }
 
-// SetFederationMode updates the federation mode
+
 func SetFederationMode(mode string, allowUnknown, requireCapNeg, strictValid *bool) error {
 	query := `UPDATE federation_config SET mode = $1, updated_at = NOW()`
 	args := []interface{}{mode}
@@ -776,7 +776,7 @@ func SetFederationMode(mode string, allowUnknown, requireCapNeg, strictValid *bo
 	return err
 }
 
-// GetFederationConfig retrieves full config
+
 func GetFederationConfig() (*models.FederationConfig, error) {
 	var config models.FederationConfig
 	err := db.QueryRow(`
@@ -794,11 +794,11 @@ func GetFederationConfig() (*models.FederationConfig, error) {
 	return &config, err
 }
 
-// ============================================================================
-// User Story 2.14: Instance Health API
-// ============================================================================
 
-// UpdateHealthMetrics updates instance health data
+
+
+
+
 func UpdateHealthMetrics() error {
 	var totalMessages, successful, failed, pending int64
 	var blockedCount int
@@ -809,7 +809,7 @@ func UpdateHealthMetrics() error {
 	db.QueryRow(`SELECT COUNT(*) FROM outbox_activities WHERE delivery_status = 'pending'`).Scan(&pending)
 	db.QueryRow(`SELECT COUNT(*) FROM blocked_servers WHERE is_active = true`).Scan(&blockedCount)
 
-	// Calculate average latency (simplified)
+	
 	var avgLatency float64
 	db.QueryRow(`
 		SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (delivered_at - created_at)) * 1000), 0)
@@ -818,7 +818,7 @@ func UpdateHealthMetrics() error {
 		AND delivered_at > NOW() - INTERVAL '1 hour'
 	`).Scan(&avgLatency)
 
-	// Determine status
+	
 	status := "healthy"
 	failureRate := float64(0)
 	if totalMessages > 0 {
@@ -847,7 +847,7 @@ func UpdateHealthMetrics() error {
 	return err
 }
 
-// GetHealthStatus returns current health status
+
 func GetHealthStatus() (*models.InstanceHealth, error) {
 	var health models.InstanceHealth
 
@@ -868,15 +868,15 @@ func GetHealthStatus() (*models.InstanceHealth, error) {
 	return &health, err
 }
 
-// ============================================================================
-// Utility Functions
-// ============================================================================
+
+
+
 
 func stringPtr(s string) *string {
 	return &s
 }
 
-// IsUserBlocked checks if a user has blocked another user
+
 func IsUserBlocked(blockerID, blockedID string) (bool, error) {
 	var blocked bool
 	err := db.QueryRow(`

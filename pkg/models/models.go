@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Visibility represents content visibility settings
+
 type Visibility string
 
 const (
@@ -18,7 +18,7 @@ const (
 
 type Identity struct {
 	ID             uuid.UUID `json:"id"`
-	DID            string    `json:"did,omitempty"` // Decentralized Identifier
+	DID            string    `json:"did,omitempty"` 
 	UserID         string    `json:"user_id"`
 	HomeServer     string    `json:"home_server"`
 	PublicKey      string    `json:"public_key"`
@@ -26,37 +26,37 @@ type Identity struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 
-	// Crypto & Federation
-	Signature       string   `json:"signature,omitempty"`         // Self-signed Identity
-	KeyVersion      int      `json:"key_version"`                 // Current key version
-	RecoveryKeyHash string   `json:"recovery_key_hash,omitempty"` // Hashed recovery key
-	Metadata        Metadata `json:"metadata,omitempty"`          // Extensible metadata
-	PrivateKey      string   `json:"-"`                           // Encrypted private key (never JSON exported)
+	
+	Signature       string   `json:"signature,omitempty"`         
+	KeyVersion      int      `json:"key_version"`                 
+	RecoveryKeyHash string   `json:"recovery_key_hash,omitempty"` 
+	Metadata        Metadata `json:"metadata,omitempty"`          
+	PrivateKey      string   `json:"-"`                           
 }
 
 type Metadata map[string]interface{}
 
-// PortableProfile represents a full export of a user's data
+
 type PortableProfile struct {
 	User        UserDocument `json:"user_document"`
 	Posts       []Post       `json:"posts"`
 	Followers   []string     `json:"followers"`
 	Following   []string     `json:"following"`
 	ExportedAt  time.Time    `json:"exported_at"`
-	IdentitySig string       `json:"identity_signature"` // Signed by the Identity Key
-	PrivateKey  string       `json:"private_key"`        // User's encrypted private key for portability
+	IdentitySig string       `json:"identity_signature"` 
+	PrivateKey  string       `json:"private_key"`        
 }
 
-// KeyRevocation represents a revoked key
+
 type KeyRevocation struct {
 	KeyID      string    `json:"key_id"`
 	IdentityID uuid.UUID `json:"identity_id"`
 	Reason     string    `json:"reason"`
 	RevokedAt  time.Time `json:"revoked_at"`
-	Signature  string    `json:"signature"` // Signed by a valid key (or recovery key)
+	Signature  string    `json:"signature"` 
 }
 
-// BlockEvent represents a federation-wide block
+
 type BlockEvent struct {
 	BlockerID string    `json:"blocker_id"`
 	BlockedID string    `json:"blocked_id"`
@@ -81,7 +81,7 @@ type Profile struct {
 	FollowersCount      *int       `json:"followers_count,omitempty"`
 	FollowingCount      *int       `json:"following_count,omitempty"`
 
-	Version int `json:"version"` // For sync versioning
+	Version int `json:"version"` 
 }
 
 type UserDocument struct {
@@ -139,9 +139,9 @@ type UpdateProfileRequest struct {
 	FollowingVisibility *string `json:"following_visibility,omitempty"`
 }
 
-// =================================================================
-// EPIC 3 — PRIVACY, ENCRYPTION & USER SAFETY
-// =================================================================
+
+
+
 
 type PrivacyAuditLog struct {
 	ID            string    `json:"id" db:"id"`
@@ -175,12 +175,12 @@ const (
 	VisibilityMutuals VisibilityLevel = "mutuals"
 )
 
-// ===============================
-// EPIC 4 — CONTENT & TIMELINE
-// ===============================
 
-// Post represents a federated social post
-// Used by Epic 1, Epic 4, and Timeline service
+
+
+
+
+
 type Post struct {
 	ID        string    `json:"id"`
 	Author    string    `json:"author"`
@@ -195,12 +195,12 @@ type Post struct {
 	HasLiked    bool `json:"has_liked"`
 	HasReposted bool `json:"has_reposted"`
 
-	// Epic 4 additions (non-breaking)
+	
 	IsEdited   bool `json:"is_edited"`
 	VersionNum int  `json:"version_num"`
 }
 
-// PostVersion represents a historical version of an edited post
+
 type PostVersion struct {
 	ID         uuid.UUID `json:"id"`
 	PostID     string    `json:"post_id"`
@@ -211,15 +211,15 @@ type PostVersion struct {
 	ChangeNote *string   `json:"change_note,omitempty"`
 }
 
-// PostWithVersions bundles a post with its full edit history
+
 type PostWithVersions struct {
 	Post     Post          `json:"post"`
 	Versions []PostVersion `json:"versions"`
 }
 
-// =================================================================
-// EPIC 5 — GOVERNANCE & MODERATION
-// =================================================================
+
+
+
 
 type ReportStatus string
 
@@ -272,15 +272,15 @@ type BackupMetadata struct {
 	CreatedBy string    `json:"created_by"`
 }
 
-// =================================================================
-// TIMELINE & OPTIMIZATION MODELS
-// =================================================================
 
-// CachedTimeline represents cached timeline data for offline access
+
+
+
+
 type CachedTimeline struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    string    `json:"user_id"`
-	PostData  string    `json:"post_data"` // JSON serialized []models.Post
+	PostData  string    `json:"post_data"` 
 	CachedAt  time.Time `json:"cached_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	SizeBytes int64     `json:"size_bytes"`
@@ -295,7 +295,7 @@ type OfflineConfig struct {
 
 func DefaultOfflineConfig() OfflineConfig {
 	return OfflineConfig{
-		MaxCacheSizeBytes: 50 * 1024 * 1024, // 50MB
+		MaxCacheSizeBytes: 50 * 1024 * 1024, 
 		MaxPostsPerUser:   500,
 		CacheDuration:     24 * time.Hour,
 		AutoRefresh:       true,
@@ -334,31 +334,31 @@ type ServerLoad struct {
 	Timestamp      time.Time `json:"timestamp"`
 }
 
-// ============================================================================
-// FEDERATION MODELS (from internal/federation)
-// ============================================================================
 
-// ProtocolVersion represents the federation protocol version for backward compatibility
+
+
+
+
 type ProtocolVersion struct {
 	Major int `json:"major"`
 	Minor int `json:"minor"`
 	Patch int `json:"patch"`
 }
 
-// FederationMessage is the core message structure for all federation communications
+
 type FederationMessage struct {
 	ID             uuid.UUID              `json:"id"`
-	Version        string                 `json:"version"`         // "1.0.0"
-	MessageType    string                 `json:"message_type"`    // "activity", "ack", "capability", "health"
-	SenderServer   string                 `json:"sender_server"`   // "https://server1.com"
-	ReceiverServer string                 `json:"receiver_server"` // "https://server2.com"
+	Version        string                 `json:"version"`         
+	MessageType    string                 `json:"message_type"`    
+	SenderServer   string                 `json:"sender_server"`   
+	ReceiverServer string                 `json:"receiver_server"` 
 	Timestamp      time.Time              `json:"timestamp"`
 	Payload        map[string]interface{} `json:"payload"`
-	Signature      *string                `json:"signature,omitempty"` // Crypto signature for verification
+	Signature      *string                `json:"signature,omitempty"` 
 	CreatedAt      time.Time              `json:"created_at"`
 }
 
-// FederationRequest is the standard request envelope
+
 type FederationRequest struct {
 	Version string                 `json:"version"`
 	Type    string                 `json:"type"`
@@ -366,7 +366,7 @@ type FederationRequest struct {
 	Payload map[string]interface{} `json:"payload"`
 }
 
-// FederationResponse is the standard response envelope
+
 type FederationResponse struct {
 	Success bool                   `json:"success"`
 	Message string                 `json:"message,omitempty"`
@@ -374,60 +374,60 @@ type FederationResponse struct {
 	Error   *ErrorResponse         `json:"error,omitempty"`
 }
 
-// ErrorResponse provides standardized error format
+
 type ErrorResponse struct {
-	Code    int    `json:"code"`              // HTTP status code
-	Type    string `json:"type"`              // Error type: "validation", "auth", "rate_limit", "protocol", "internal"
-	Message string `json:"message"`           // Human-readable error message
-	Details string `json:"details,omitempty"` // Additional context
+	Code    int    `json:"code"`              
+	Type    string `json:"type"`              
+	Message string `json:"message"`           
+	Details string `json:"details,omitempty"` 
 }
 
-// DeliveryAttempt tracks retry attempts for failed message deliveries
+
 type DeliveryAttempt struct {
 	ID             uuid.UUID  `json:"id"`
 	MessageID      uuid.UUID  `json:"message_id"`
 	AttemptNumber  int        `json:"attempt_number"`
-	Status         string     `json:"status"` // "pending", "success", "failed", "expired"
+	Status         string     `json:"status"` 
 	ErrorMessage   *string    `json:"error_message,omitempty"`
 	NextRetryAt    *time.Time `json:"next_retry_at,omitempty"`
-	BackoffSeconds int        `json:"backoff_seconds"` // Current backoff duration
+	BackoffSeconds int        `json:"backoff_seconds"` 
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
-// RetryConfig defines the retry strategy
+
 type RetryConfig struct {
-	MaxRetries     int           `json:"max_retries"`     // Default: 6
-	InitialBackoff time.Duration `json:"initial_backoff"` // Default: 30s
-	MaxBackoff     time.Duration `json:"max_backoff"`     // Default: 6h
-	ExpirationTime time.Duration `json:"expiration_time"` // Default: 24h
+	MaxRetries     int           `json:"max_retries"`     
+	InitialBackoff time.Duration `json:"initial_backoff"` 
+	MaxBackoff     time.Duration `json:"max_backoff"`     
+	ExpirationTime time.Duration `json:"expiration_time"` 
 }
 
-// InboxActivity represents an inbound federated activity
+
 type InboxActivity struct {
 	ID           uuid.UUID  `json:"id"`
-	ActivityType string     `json:"activity_type"`       // "Follow", "Like", "Post", "Message"
-	ActorID      string     `json:"actor_id"`            // Remote user ID
-	ActorServer  string     `json:"actor_server"`        // Remote server URL
-	TargetID     *string    `json:"target_id,omitempty"` // Local user/object ID
-	Payload      string     `json:"payload"`             // JSON string
+	ActivityType string     `json:"activity_type"`       
+	ActorID      string     `json:"actor_id"`            
+	ActorServer  string     `json:"actor_server"`        
+	TargetID     *string    `json:"target_id,omitempty"` 
+	Payload      string     `json:"payload"`             
 	ReceivedAt   time.Time  `json:"received_at"`
 	ProcessedAt  *time.Time `json:"processed_at,omitempty"`
-	ProcessedBy  *string    `json:"processed_by,omitempty"` // Handler that processed it
-	Status       string     `json:"status"`                 // "received", "processing", "processed", "failed"
+	ProcessedBy  *string    `json:"processed_by,omitempty"` 
+	Status       string     `json:"status"`                 
 	ErrorMessage *string    `json:"error_message,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
-// OutboxActivity represents an outbound federated activity
+
 type OutboxActivity struct {
 	ID             uuid.UUID  `json:"id"`
 	ActivityType   string     `json:"activity_type"`
-	ActorID        string     `json:"actor_id"`            // Local user ID
-	TargetServer   string     `json:"target_server"`       // Destination server URL
-	TargetID       *string    `json:"target_id,omitempty"` // Remote user/object ID
-	Payload        string     `json:"payload"`             // JSON string
-	DeliveryStatus string     `json:"delivery_status"`     // "pending", "delivered", "failed", "expired"
+	ActorID        string     `json:"actor_id"`            
+	TargetServer   string     `json:"target_server"`       
+	TargetID       *string    `json:"target_id,omitempty"` 
+	Payload        string     `json:"payload"`             
+	DeliveryStatus string     `json:"delivery_status"`     
 	DeliveredAt    *time.Time `json:"delivered_at,omitempty"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
 	ErrorMessage   *string    `json:"error_message,omitempty"`
@@ -435,7 +435,7 @@ type OutboxActivity struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
-// InboxRequest for posting to inbox endpoint
+
 type InboxRequest struct {
 	ActivityType string                 `json:"activity_type"`
 	Actor        string                 `json:"actor"`
@@ -445,39 +445,39 @@ type InboxRequest struct {
 	Signature    *string                `json:"signature,omitempty"`
 }
 
-// DeliveryAcknowledgment represents a receipt confirmation
+
 type DeliveryAcknowledgment struct {
 	ID             uuid.UUID `json:"id"`
-	MessageID      uuid.UUID `json:"message_id"`       // Original message ID
-	SenderServer   string    `json:"sender_server"`    // Who sent the original message
-	ReceiverServer string    `json:"receiver_server"`  // Who is acknowledging
-	Status         string    `json:"status"`           // "received", "processed", "rejected"
-	Reason         *string   `json:"reason,omitempty"` // If rejected, why
+	MessageID      uuid.UUID `json:"message_id"`       
+	SenderServer   string    `json:"sender_server"`    
+	ReceiverServer string    `json:"receiver_server"`  
+	Status         string    `json:"status"`           
+	Reason         *string   `json:"reason,omitempty"` 
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// AcknowledgmentRequest for sending acknowledgments
+
 type AcknowledgmentRequest struct {
 	MessageID uuid.UUID `json:"message_id"`
 	Status    string    `json:"status"`
 	Reason    *string   `json:"reason,omitempty"`
 }
 
-// RateLimit defines rate limiting configuration and state
+
 type RateLimit struct {
 	ID              uuid.UUID  `json:"id"`
-	ServerURL       string     `json:"server_url"`       // Target server, or "*" for global
-	Endpoint        string     `json:"endpoint"`         // Endpoint path, or "*" for all
-	RequestsPerMin  int        `json:"requests_per_min"` // Max requests per minute
-	BurstAllowance  int        `json:"burst_allowance"`  // Burst allowance
-	CurrentCount    int        `json:"current_count"`    // Current request count
+	ServerURL       string     `json:"server_url"`       
+	Endpoint        string     `json:"endpoint"`         
+	RequestsPerMin  int        `json:"requests_per_min"` 
+	BurstAllowance  int        `json:"burst_allowance"`  
+	CurrentCount    int        `json:"current_count"`    
 	WindowStartedAt time.Time  `json:"window_started_at"`
 	LastRequestAt   *time.Time `json:"last_request_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-// RateLimitConfig for setting rate limits
+
 type RateLimitConfig struct {
 	ServerURL      string `json:"server_url"`
 	Endpoint       string `json:"endpoint"`
@@ -485,10 +485,10 @@ type RateLimitConfig struct {
 	BurstAllowance int    `json:"burst_allowance"`
 }
 
-// SerializedActivity represents a canonically serialized activity
+
 type SerializedActivity struct {
-	Version   string                 `json:"@version"` // Protocol version
-	Type      string                 `json:"@type"`    // Activity type
+	Version   string                 `json:"@version"` 
+	Type      string                 `json:"@type"`    
 	ID        string                 `json:"id"`
 	Actor     string                 `json:"actor"`
 	Published time.Time              `json:"published"`
@@ -497,53 +497,53 @@ type SerializedActivity struct {
 	Context   map[string]interface{} `json:"@context,omitempty"`
 }
 
-// ServerCapabilities advertises supported features
+
 type ServerCapabilities struct {
 	ID               uuid.UUID `json:"id"`
 	ServerURL        string    `json:"server_url"`
-	ProtocolVersions string    `json:"protocol_versions"` // JSON array: ["1.0.0", "1.1.0"]
-	SupportedTypes   string    `json:"supported_types"`   // JSON array: ["Follow", "Like", "Post"]
-	MaxMessageSize   int       `json:"max_message_size"`  // In bytes
+	ProtocolVersions string    `json:"protocol_versions"` 
+	SupportedTypes   string    `json:"supported_types"`   
+	MaxMessageSize   int       `json:"max_message_size"`  
 	SupportsRetries  bool      `json:"supports_retries"`
 	SupportsAcks     bool      `json:"supports_acks"`
-	RateLimitInfo    *string   `json:"rate_limit_info,omitempty"` // JSON object with limits
-	CustomFeatures   *string   `json:"custom_features,omitempty"` // JSON object
+	RateLimitInfo    *string   `json:"rate_limit_info,omitempty"` 
+	CustomFeatures   *string   `json:"custom_features,omitempty"` 
 	LastDiscoveredAt time.Time `json:"last_discovered_at"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// CapabilityRequest for capability discovery
+
 type CapabilityRequest struct {
 	ServerURL string `json:"server_url"`
 }
 
-// FederationBlockedServer represents a server on the federation blocklist
+
 type FederationBlockedServer struct {
 	ID        uuid.UUID  `json:"id"`
 	ServerURL string     `json:"server_url"`
-	Reason    string     `json:"reason"`     // Why blocked
-	BlockedBy string     `json:"blocked_by"` // Admin who blocked
+	Reason    string     `json:"reason"`     
+	BlockedBy string     `json:"blocked_by"` 
 	BlockedAt time.Time  `json:"blocked_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"` // Optional expiration
-	IsActive  bool       `json:"is_active"`            // Can be temporarily disabled
+	ExpiresAt *time.Time `json:"expires_at,omitempty"` 
+	IsActive  bool       `json:"is_active"`            
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
-// BlockServerRequest for blocking a server
+
 type BlockServerRequest struct {
 	ServerURL string     `json:"server_url"`
 	Reason    string     `json:"reason"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-// FederationConfig stores federation mode and settings
+
 type FederationConfig struct {
 	ID                   uuid.UUID `json:"id"`
-	Mode                 string    `json:"mode"`                   // "soft", "hard"
-	AllowUnknownServers  bool      `json:"allow_unknown_servers"`  // Only in soft mode
-	RequireCapabilityNeg bool      `json:"require_capability_neg"` // Required in hard mode
+	Mode                 string    `json:"mode"`                   
+	AllowUnknownServers  bool      `json:"allow_unknown_servers"`  
+	RequireCapabilityNeg bool      `json:"require_capability_neg"` 
 	StrictValidation     bool      `json:"strict_validation"`
 	LogUnknownServers    bool      `json:"log_unknown_servers"`
 	AutoBlockMalicious   bool      `json:"auto_block_malicious"`
@@ -551,18 +551,18 @@ type FederationConfig struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
-// FederationModeRequest for changing mode
+
 type FederationModeRequest struct {
-	Mode                 string `json:"mode"` // "soft" or "hard"
+	Mode                 string `json:"mode"` 
 	AllowUnknownServers  *bool  `json:"allow_unknown_servers,omitempty"`
 	RequireCapabilityNeg *bool  `json:"require_capability_neg,omitempty"`
 	StrictValidation     *bool  `json:"strict_validation,omitempty"`
 }
 
-// InstanceHealth represents the health status of the federation instance
+
 type InstanceHealth struct {
 	ID                   uuid.UUID `json:"id"`
-	Status               string    `json:"status"` // "healthy", "degraded", "unhealthy"
+	Status               string    `json:"status"` 
 	TotalMessages        int64     `json:"total_messages"`
 	SuccessfulDeliveries int64     `json:"successful_deliveries"`
 	FailedDeliveries     int64     `json:"failed_deliveries"`
@@ -577,7 +577,7 @@ type InstanceHealth struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
-// HealthResponse for the health endpoint
+
 type HealthResponse struct {
 	Status               string    `json:"status"`
 	Timestamp            time.Time `json:"timestamp"`

@@ -6,11 +6,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// ===============================
-// Timeline-Specific Models
-// ===============================
 
-// Post represents a federated social post
+
+
+
+
 type Post struct {
 	ID        string    `json:"id"`
 	Author    string    `json:"author"`
@@ -25,12 +25,12 @@ type Post struct {
 	HasLiked    bool `json:"has_liked"`
 	HasReposted bool `json:"has_reposted"`
 
-	// Epic 4 additions (non-breaking)
+	
 	IsEdited   bool `json:"is_edited"`
 	VersionNum int  `json:"version_num"`
 }
 
-// PostVersion represents a historical version of an edited post
+
 type PostVersion struct {
 	ID         uuid.UUID `json:"id"`
 	PostID     string    `json:"post_id"`
@@ -41,7 +41,7 @@ type PostVersion struct {
 	ChangeNote *string   `json:"change_note,omitempty"`
 }
 
-// PostWithVersions bundles a post with its full edit history
+
 type PostWithVersions struct {
 	Post     Post          `json:"post"`
 	Versions []PostVersion `json:"versions"`
@@ -56,11 +56,11 @@ type Reply struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ===============================
-// Ranking & Preferences
-// ===============================
 
-// RankingMode represents supported timeline ranking modes
+
+
+
+
 type RankingMode string
 
 const (
@@ -70,7 +70,7 @@ const (
 	RankingModeTrending      RankingMode = "trending"
 )
 
-// UserRankingPreference stores user's preferred timeline sorting
+
 type UserRankingPreference struct {
 	UserID     string      `json:"user_id"`
 	Preference RankingMode `json:"preference"`
@@ -78,15 +78,15 @@ type UserRankingPreference struct {
 	UpdatedAt  time.Time   `json:"updated_at"`
 }
 
-// ===============================
-// Offline Cache
-// ===============================
 
-// CachedTimeline represents cached timeline data for offline access
+
+
+
+
 type CachedTimeline struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    string    `json:"user_id"`
-	PostData  string    `json:"post_data"` // JSON serialized []Post
+	PostData  string    `json:"post_data"` 
 	CachedAt  time.Time `json:"cached_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	SizeBytes int64     `json:"size_bytes"`
@@ -101,16 +101,16 @@ type OfflineConfig struct {
 
 func DefaultOfflineConfig() OfflineConfig {
 	return OfflineConfig{
-		MaxCacheSizeBytes: 50 * 1024 * 1024, // 50MB
+		MaxCacheSizeBytes: 50 * 1024 * 1024, 
 		MaxPostsPerUser:   500,
 		CacheDuration:     24 * time.Hour,
 		AutoRefresh:       true,
 	}
 }
 
-// ===============================
-// Adaptive Refresh
-// ===============================
+
+
+
 
 type RefreshConfig struct {
 	UserID          string        `json:"user_id"`
@@ -136,11 +136,11 @@ func DefaultRefreshConfig(userID string) RefreshConfig {
 	}
 }
 
-// ===============================
-// Activity & Load Levels
-// ===============================
 
-// ActivityLevel represents user activity intensity
+
+
+
+
 type ActivityLevel string
 
 const (
@@ -150,7 +150,7 @@ const (
 	ActivityIdle   ActivityLevel = "idle"
 )
 
-// LoadLevel represents server load intensity
+
 type LoadLevel string
 
 const (
@@ -167,17 +167,17 @@ type ServerLoad struct {
 	Timestamp      time.Time `json:"timestamp"`
 }
 
-// ===============================
-// Timeline DTOs
-// ===============================
 
-// RankedPost extends Post with ranking score
+
+
+
+
 type RankedPost struct {
 	Post
 	RankScore float64 `json:"rank_score"`
 }
 
-// TimelineRequest represents a request for timeline data
+
 type TimelineRequest struct {
 	UserID      string      `json:"user_id"`
 	RankingMode RankingMode `json:"ranking_mode,omitempty"`
@@ -185,7 +185,7 @@ type TimelineRequest struct {
 	Offset      int         `json:"offset"`
 }
 
-// TimelineResponse represents the timeline response
+
 type TimelineResponse struct {
 	Posts       []RankedPost `json:"posts"`
 	RankingMode RankingMode  `json:"ranking_mode"`

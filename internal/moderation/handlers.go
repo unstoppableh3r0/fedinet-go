@@ -14,9 +14,9 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// --------------------
-// Abuse Reports
-// --------------------
+
+
+
 
 func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -89,9 +89,9 @@ func (h *Handler) ResolveReport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// --------------------
-// Server Blacklisting
-// --------------------
+
+
+
 
 func (h *Handler) BlockServer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

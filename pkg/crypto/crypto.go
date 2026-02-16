@@ -11,8 +11,8 @@ import (
 	"io"
 )
 
-// GenerateKeyPair generates a new Ed25519 key pair.
-// Returns hex-encoded public and private keys.
+
+
 func GenerateKeyPair() (string, string, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -21,8 +21,8 @@ func GenerateKeyPair() (string, string, error) {
 	return hex.EncodeToString(pub), hex.EncodeToString(priv), nil
 }
 
-// SignData signs the data with the given private key.
-// Expects hex-encoded private key. Returns hex-encoded signature.
+
+
 func SignData(data []byte, privKeyHex string) (string, error) {
 	privKeyBytes, err := hex.DecodeString(privKeyHex)
 	if err != nil {
@@ -36,8 +36,8 @@ func SignData(data []byte, privKeyHex string) (string, error) {
 	return hex.EncodeToString(signature), nil
 }
 
-// VerifySignature verifies the signature against the data using the public key.
-// Expects hex-encoded public key and signature.
+
+
 func VerifySignature(data []byte, signatureHex, pubKeyHex string) (bool, error) {
 	pubKeyBytes, err := hex.DecodeString(pubKeyHex)
 	if err != nil {
@@ -55,7 +55,7 @@ func VerifySignature(data []byte, signatureHex, pubKeyHex string) (bool, error) 
 	return ed25519.Verify(pubKeyBytes, data, signatureBytes), nil
 }
 
-// GenerateRecoveryKey generates a random 32-byte hex-encoded key and its SHA-256 hash.
+
 func GenerateRecoveryKey() (string, string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -66,16 +66,16 @@ func GenerateRecoveryKey() (string, string, error) {
 	return key, hex.EncodeToString(hash[:]), nil
 }
 
-// HashString returns the SHA-256 hash of a string.
+
 func HashString(s string) string {
 	hash := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(hash[:])
 }
 
-// Encryption Helpers
 
-// Encrypt encrypts data using AES-GCM and the provided master key (hex encoded).
-// Returns hex-encoded nonce + ciphertext.
+
+
+
 func Encrypt(plaintext, masterKeyHex string) (string, error) {
 	if masterKeyHex == "" {
 		return "", errors.New("master key is empty")
@@ -105,7 +105,7 @@ func Encrypt(plaintext, masterKeyHex string) (string, error) {
 	return hex.EncodeToString(ciphertext), nil
 }
 
-// Decrypt decrypts data using AES-GCM and the provided master key (hex encoded).
+
 func Decrypt(ciphertextHex, masterKeyHex string) (string, error) {
 	if masterKeyHex == "" {
 		return "", errors.New("master key is empty")

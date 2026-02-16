@@ -14,9 +14,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// ============================================================================
-// Server Initialization Types
-// ============================================================================
+
+
+
 
 type ServerInitRequest struct {
 	ServerName    string `json:"server_name"`
@@ -38,9 +38,9 @@ type ServerStatusResponse struct {
 	PublicKey   string `json:"public_key,omitempty"`
 }
 
-// ============================================================================
-// Initialization Check
-// ============================================================================
+
+
+
 
 func CheckInitializationStatus() (bool, error) {
 	var initialized bool
@@ -57,12 +57,12 @@ func CheckInitializationStatus() (bool, error) {
 	return initialized, nil
 }
 
-// ============================================================================
-// Server Initialization
-// ============================================================================
+
+
+
 
 func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
-	// Validate input
+	
 	if req.ServerName == "" {
 		return nil, errors.New("server_name is required")
 	}
@@ -76,7 +76,7 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, errors.New("admin_password must be at least 8 characters")
 	}
 
-	// Check if already initialized
+	
 	initialized, err := CheckInitializationStatus()
 	if err != nil {
 		return nil, err
@@ -85,31 +85,31 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, errors.New("server already initialized")
 	}
 
-	// Generate Ed25519 keypair
+	
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	// Generate unique server ID
+	
 	serverID := uuid.New()
 
-	// Encode keys to base64
+	
 	publicKeyB64 := base64.StdEncoding.EncodeToString(publicKey)
 	privateKeyB64 := base64.StdEncoding.EncodeToString(privateKey)
 
-	// For now, store private key as-is (TODO: implement encryption)
-	// In production, encrypt with a key derived from environment or HSM
+	
+	
 	encryptedPrivateKey := privateKeyB64
 
-	// Begin transaction
+	
 	tx, err := db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	// Insert server identity
+	
 	_, err = tx.Exec(`
 		INSERT INTO server_identity (id, server_id, server_name, public_key, private_key_encrypted)
 		VALUES (1, $1, $2, $3, $4)
@@ -119,13 +119,13 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, err
 	}
 
-	// Hash admin password
+	
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.AdminPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create super admin
+	
 	_, err = tx.Exec(`
 		INSERT INTO admins (username, password_hash, is_super_admin, created_by)
 		VALUES ($1, $2, true, NULL)
@@ -135,7 +135,7 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, err
 	}
 
-	// Commit transaction
+	
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -151,9 +151,9 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 	}, nil
 }
 
-// ============================================================================
-// HTTP Handlers
-// ============================================================================
+
+
+
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -171,7 +171,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		Initialized: initialized,
 	}
 
-	// If initialized, include server info
+	
 	if initialized {
 		var serverID, serverName, publicKey string
 		err := db.QueryRow(`
@@ -211,9 +211,9 @@ func InitializeHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, response)
 }
 
-// ============================================================================
-// Get Server Public Info
-// ============================================================================
+
+
+
 
 func GetServerInfoHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

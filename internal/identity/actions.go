@@ -28,7 +28,7 @@ func FollowUser(followerID, followeeID string) error {
 		return err
 	}
 
-	// Create Notification
+	
 	return CreateNotification(followeeID, followerID, "FOLLOW", "")
 }
 
@@ -66,7 +66,7 @@ func SendMessage(senderID, recipientID, content string) error {
 		return err
 	}
 
-	// Wrap content in JSON for LogActivity
+	
 	payload := fmt.Sprintf(`{"content": %q}`, content)
 
 	return LogActivity(
@@ -144,7 +144,7 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 		&p.BannerURL,
 		&p.Bio,
 		&p.PortfolioURL,
-		&birthDate, // Scan as sql.NullTime first
+		&birthDate, 
 		&p.Location,
 		&p.FollowersVisibility,
 		&p.FollowingVisibility,
@@ -163,7 +163,7 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 		return nil, err
 	}
 
-	// Convert birth_date to time.Time pointer
+	
 	if birthDate.Valid {
 		t := birthDate.Time
 		p.BirthDate = &t
@@ -172,23 +172,19 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 	return &p, nil
 }
 
-// CreateAccount atomically creates an identity and a default profile
-func CreateAccount(userID, homeServer, password string) (string, error) {
+
+func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 	if !ValidateUserID(userID) {
 		return "", fmt.Errorf("invalid user_id format")
 	}
 
-	// (Self-note: We don't have a full models.Identity struct here yet to validate via ValidateIdentityDocument
-	// because we are about to create it. But we could construct a partial one or just rely on ValidateUserID
-	// which we just did. ValidateIdentityDocument checks ID(nil), UserID, PublicKey(empty), HomeServer, CreatedAt.
-	// Here we generate most of that. So explicit validation of the inputs is what we are doing.)
-	// Generate Keys
+	
 	pubKey, privKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		return "", err
 	}
 
-	// Generate Recovery Key
+	
 	recoveryKey, recoveryHash, err := crypto.GenerateRecoveryKey()
 	if err != nil {
 		return "", err
@@ -200,7 +196,7 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 	}
 	defer tx.Rollback()
 
-	// 1. Check if user exists
+	
 	var exists bool
 	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM identities WHERE user_id=$1)", userID).Scan(&exists)
 	if err != nil {
@@ -210,14 +206,10 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 		return "", fmt.Errorf("user already exists")
 	}
 
-	// Encrypt Private Key
+	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
-		// Fallback or Error? Ideally Error. For dev, fallback to a known key or error.
-		// Let's soft-fail for dev convenience if user didn't set it, but warn.
-		// Or generate one on the fly? No, that's ephemeral.
-		// Check implementation_plan: "Default to dev key if missing"
-		masterKey = "0000000000000000000000000000000000000000000000000000000000000000" // 32 bytes hex
+		masterKey = "0000000000000000000000000000000000000000000000000000000000000000" 
 		fmt.Println("WARNING: Using insecure default SERVER_MASTER_KEY")
 	}
 
@@ -226,17 +218,10 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 		return "", fmt.Errorf("failed to encrypt private key: %w", err)
 	}
 
-	// Generate DID (Decentralized Identifier)
-	// Simple scheme: did:fedinet:<public_key_hash>
+	
 	did := "did:fedinet:" + crypto.HashString(pubKey)
 
-	// Hash password
-	passwordHash, err := HashPassword(password)
-	if err != nil {
-		return "", fmt.Errorf("failed to hash password: %w", err)
-	}
-
-	// 2. Insert models.Identity
+	
 	identityID := uuid.New()
 	_, err = tx.Exec(`
 		INSERT INTO identities (
@@ -247,7 +232,7 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 		return "", err
 	}
 
-	// 3. Insert Default models.Profile
+	
 	_, err = tx.Exec(`
 		INSERT INTO profiles (
 			user_id, display_name, bio, location, 
@@ -256,7 +241,7 @@ func CreateAccount(userID, homeServer, password string) (string, error) {
 			$1, $2, 'Just joined Gotham Social', 'Unknown',
 			'public', 'public', NOW(), NOW(), 1
 		)
-	`, userID, userID) // Display name defaults to userID
+	`, userID, userID) 
 	if err != nil {
 		return "", err
 	}
@@ -300,27 +285,27 @@ func GetIdentityByUserID(userID string) (*models.Identity, error) {
 		return nil, nil
 	}
 	if err != nil {
-		// Handle potential NULLs if rows exist but cols are null?
-		// Signature etc are nullable in DB? I added them as... TEXT.
-		// If they are NULL, Scan into string will fail?
-		// I should use sql.NullString or *string if they are nullable.
-		// models.Identity struct has Signature string.
-		// If DB has NULL, Scan assigns to string? No, it errors.
-		// I should treat them as nullable in struct OR Ensure they are '' in DB (DEFAULT '').
-		// I didn't set DEFAULT '' in migration.
-		// So for EXISTING identities, they will be NULL.
-		// I must handle NULLs.
-		// But for NEW identities, they might be empty string or NULL?
-		// GenerateKeyPair returns string. Insert uses it.
-		// I should assume they are nullable.
-		// Let's use *string in Scan for nullable fields or COALESCE in query.
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
 		return nil, err
 	}
 
 	return &i, nil
 }
 
-// UpdateProfile updates profile fields dynamically
+
 func UpdateProfile(req models.UpdateProfileRequest) error {
 	query := "UPDATE profiles SET updated_at = NOW(), version = version + 1"
 	args := []interface{}{}
@@ -380,12 +365,12 @@ func UpdateProfile(req models.UpdateProfileRequest) error {
 		return err
 	}
 
-	// Propagate update to followers
+	
 	return propagateProfileUpdate(req.UserID, req)
 }
 
 func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) error {
-	// 1. Get unique servers of followers
+	
 	rows, err := db.Query(`
         SELECT DISTINCT follower_home_server 
         FROM follows 
@@ -394,7 +379,7 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
         AND follower_home_server != ''
     `, userID)
 	if err != nil {
-		return err // Log error?
+		return err 
 	}
 	defer rows.Close()
 
@@ -410,32 +395,32 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 		return nil
 	}
 
-	// 2. Construct Payload
-	// We need the FULL profile or just the changes?
-	// ActivityPub usually sends the full object or partial.
-	// Let's send a constructed Person object with updated fields + version.
+	
+	
+	
+	
 
-	// We need to fetch the current state of version from DB to be accurate?
-	// UpdateProfile just incremented it.
+	
+	
 	var currentVersion int
 	db.QueryRow("SELECT version FROM profiles WHERE user_id=$1", userID).Scan(&currentVersion)
 
-	// Construct object
+	
 	obj := map[string]interface{}{
 		"type":    "Person",
-		"id":      userID, // Internal ID, typically a URL
+		"id":      userID, 
 		"version": currentVersion,
 		"updated": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	// Add fields
+	
 	if req.DisplayName != nil {
 		obj["display_name"] = *req.DisplayName
 	}
 	if req.Bio != nil {
 		obj["bio"] = *req.Bio
 	}
-	// Add other fields as necessary
+	
 
 	payload := map[string]interface{}{
 		"@context": "https://www.w3.org/ns/activitystreams",
@@ -449,8 +434,8 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 		return err
 	}
 
-	// 3. Insert into Outbox for each server
-	// TODO: optimization - batch insert?
+	
+	
 	for _, server := range servers {
 		_, err := db.Exec(`
             INSERT INTO outbox_activities (
@@ -482,7 +467,7 @@ func CreatePost(userID, content string) (string, error) {
 }
 
 func ToggleLike(userID, postID string) error {
-	// Check if already liked
+	
 	var exists bool
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM likes WHERE user_id=$1 AND post_id=$2)", userID, postID).Scan(&exists)
 	if err != nil {
@@ -499,17 +484,17 @@ func ToggleLike(userID, postID string) error {
 		return err
 	}
 
-	// Log activity (only for liking)
+	
 	if !exists {
 		if err := LogActivity(userID, "LIKE", "post", postID, "", ""); err != nil {
 			return err
 		}
 
-		// Create Notification
-		// We need to find the post author to notify them
+		
+		
 		var authorID string
 		if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
-			if authorID != userID { // Don't notify self-likes
+			if authorID != userID { 
 				CreateNotification(authorID, userID, "LIKE", postID)
 			}
 		}
@@ -562,8 +547,8 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 
 	LogActivity(userID, "REPLY", "post", postID, "", payload)
 
-	// Create Notification
-	// Notify post author
+	
+	
 	var authorID string
 	if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
 		if authorID != userID {
@@ -571,11 +556,11 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 		}
 	}
 
-	// If replying to a comment (parentID), notify that user too
+	
 	if parentID != nil {
 		var parentAuthorID string
 		if err := db.QueryRow("SELECT user_id FROM replies WHERE id=$1", *parentID).Scan(&parentAuthorID); err == nil {
-			if parentAuthorID != userID && parentAuthorID != authorID { // Don't double notify if same person
+			if parentAuthorID != userID && parentAuthorID != authorID { 
 				CreateNotification(parentAuthorID, userID, "REPLY", postID)
 			}
 		}
@@ -636,6 +621,51 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 	`
 
 	rows, err := db.Query(query, targetUserID, viewerUserID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []models.Post
+	for rows.Next() {
+		var p models.Post
+		err := rows.Scan(
+			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
+			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
+			&p.HasLiked, &p.HasReposted,
+		)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return posts, nil
+}
+
+func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
+	query := `
+		SELECT 
+			p.id, 
+			p.author, 
+			p.content, 
+			p.created_at, 
+			p.updated_at,
+			(SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
+			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
+			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
+			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted
+		FROM posts p
+		ORDER BY p.created_at DESC
+		LIMIT $2
+	`
+
+	rows, err := db.Query(query, viewerUserID, limit)
 	if err != nil {
 		return nil, err
 	}

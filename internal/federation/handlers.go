@@ -54,9 +54,9 @@ func ParseSignatureHeader(header string) (*SignatureParams, error) {
 }
 
 // FetchServerPublicKey retrieves the public key for a given keyId.
-// It first checks the local identities table, then falls back to federated lookup.
+// It checks: identities → trusted_servers → server_identity → remote resolve.
 func FetchServerPublicKey(keyID string) (string, error) {
-	// 1. Try local DB lookup (server_identity or identities table)
+	// 1. Try local DB lookup (identities table)
 	var publicKey string
 	err := db.QueryRow(
 		`SELECT public_key FROM identities WHERE user_id = $1`, keyID,
@@ -65,7 +65,16 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	// 2. Try server_identity table (in case keyId is a server ID)
+	// 2. Try trusted_servers table (peer keys from handshake)
+	err = db.QueryRow(
+		`SELECT public_key FROM trusted_servers WHERE server_id = $1`, keyID,
+	).Scan(&publicKey)
+	if err == nil && publicKey != "" {
+		log.Printf("✅ Found key for %s in trusted_servers", keyID)
+		return publicKey, nil
+	}
+
+	// 3. Try server_identity table (in case keyId is a server ID)
 	err = db.QueryRow(
 		`SELECT public_key FROM server_identity WHERE server_id = $1`, keyID,
 	).Scan(&publicKey)
@@ -73,7 +82,7 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	// 3. Fallback: Resolve via federated lookup
+	// 4. Fallback: Resolve via federated lookup
 	doc, err := ResolveAccount(keyID)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch public key for %s: %w", keyID, err)
@@ -569,6 +578,190 @@ func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendSuccess(w, http.StatusOK, "Rate limit configured", nil)
+}
+
+// ============================================================================
+// Federation Handshake — Automatic Key Exchange
+// ============================================================================
+
+// HandshakeHandler receives a handshake request from a remote server.
+// It stores the remote server's public key and returns this server's identity.
+// This endpoint is intentionally UNPROTECTED because it establishes initial trust.
+func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
+		return
+	}
+
+	var req struct {
+		ServerID   string `json:"server_id"`
+		ServerName string `json:"server_name"`
+		PublicKey  string `json:"public_key"`
+		Endpoint   string `json:"endpoint"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
+		return
+	}
+
+	if req.ServerID == "" || req.ServerName == "" || req.PublicKey == "" || req.Endpoint == "" {
+		sendError(w, http.StatusBadRequest, "missing_fields",
+			"server_id, server_name, public_key, and endpoint are required", "")
+		return
+	}
+
+	// Store the remote server's key (upsert)
+	_, err := db.Exec(`
+		INSERT INTO trusted_servers (server_id, server_name, public_key, endpoint)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (server_id) DO UPDATE SET
+			server_name = EXCLUDED.server_name,
+			public_key = EXCLUDED.public_key,
+			endpoint = EXCLUDED.endpoint,
+			trusted_at = NOW()
+	`, req.ServerID, req.ServerName, req.PublicKey, req.Endpoint)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "internal_error",
+			"Failed to store remote server key", err.Error())
+		return
+	}
+
+	log.Printf("🤝 Handshake received from %s (%s)", req.ServerName, req.ServerID)
+
+	// Return this server's identity
+	var localID, localName, localKey string
+	err = db.QueryRow(`SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1`).
+		Scan(&localID, &localName, &localKey)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "not_initialized",
+			"This server is not yet initialized", err.Error())
+		return
+	}
+
+	sendSuccess(w, http.StatusOK, "Handshake accepted", map[string]interface{}{
+		"server_id":   localID,
+		"server_name": localName,
+		"public_key":  localKey,
+	})
+}
+
+// InitiateHandshakeHandler triggers a handshake with a remote server.
+// It sends this server's identity to the target and stores the response.
+func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
+		return
+	}
+
+	var req struct {
+		TargetServer string `json:"target_server"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "invalid_json", "Invalid JSON payload", err.Error())
+		return
+	}
+
+	if req.TargetServer == "" {
+		sendError(w, http.StatusBadRequest, "missing_fields", "target_server is required", "")
+		return
+	}
+
+	// Get this server's identity
+	var localID, localName, localKey string
+	err := db.QueryRow(`SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1`).
+		Scan(&localID, &localName, &localKey)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "not_initialized",
+			"This server is not yet initialized", err.Error())
+		return
+	}
+
+	// Build the handshake payload
+	payload := map[string]string{
+		"server_id":   localID,
+		"server_name": localName,
+		"public_key":  localKey,
+		"endpoint":    "http://" + r.Host,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "internal_error",
+			"Failed to serialize handshake payload", err.Error())
+		return
+	}
+
+	// Send handshake to the remote server
+	targetURL := strings.TrimRight(req.TargetServer, "/") + "/federation/handshake"
+	log.Printf("🤝 Initiating handshake with %s", targetURL)
+
+	resp, err := http.Post(targetURL, "application/json", bytes.NewReader(payloadJSON))
+	if err != nil {
+		sendError(w, http.StatusBadGateway, "handshake_failed",
+			"Failed to connect to remote server", err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	var remoteResp models.FederationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&remoteResp); err != nil {
+		sendError(w, http.StatusBadGateway, "handshake_failed",
+			"Failed to parse remote server response", err.Error())
+		return
+	}
+
+	if !remoteResp.Success {
+		errMsg := "unknown error"
+		if remoteResp.Error != nil {
+			errMsg = remoteResp.Error.Message
+		}
+		sendError(w, http.StatusBadGateway, "handshake_rejected",
+			"Remote server rejected handshake", errMsg)
+		return
+	}
+
+	// Extract the remote server's identity from the response data
+	remoteID, _ := remoteResp.Data["server_id"].(string)
+	remoteName, _ := remoteResp.Data["server_name"].(string)
+	remoteKey, _ := remoteResp.Data["public_key"].(string)
+
+	if remoteID == "" || remoteKey == "" {
+		sendError(w, http.StatusBadGateway, "handshake_failed",
+			"Remote server returned incomplete identity", "")
+		return
+	}
+
+	// Store the remote server's key
+	_, err = db.Exec(`
+		INSERT INTO trusted_servers (server_id, server_name, public_key, endpoint)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (server_id) DO UPDATE SET
+			server_name = EXCLUDED.server_name,
+			public_key = EXCLUDED.public_key,
+			endpoint = EXCLUDED.endpoint,
+			trusted_at = NOW()
+	`, remoteID, remoteName, remoteKey, req.TargetServer)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "internal_error",
+			"Failed to store remote server key", err.Error())
+		return
+	}
+
+	log.Printf("✅ Handshake complete with %s (%s)", remoteName, remoteID)
+
+	sendSuccess(w, http.StatusOK, "Handshake complete — mutual trust established", map[string]interface{}{
+		"local_server": map[string]string{
+			"server_id":   localID,
+			"server_name": localName,
+		},
+		"remote_server": map[string]string{
+			"server_id":   remoteID,
+			"server_name": remoteName,
+		},
+		"status": "trusted",
+	})
 }
 
 // ============================================================================

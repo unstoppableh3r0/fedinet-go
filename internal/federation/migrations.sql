@@ -227,3 +227,20 @@ VALUES
     ('*', '/federation/inbox', 50, 10),
     ('*', '/federation/send', 50, 10)
 ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- Trusted Servers (Federation Handshake)
+-- ============================================================================
+-- Stores peer server public keys after a handshake exchange.
+-- This enables automatic key exchange instead of manual SQL.
+
+CREATE TABLE IF NOT EXISTS trusted_servers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    server_id TEXT NOT NULL UNIQUE,
+    server_name TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    trusted_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trusted_servers_server_id ON trusted_servers(server_id);

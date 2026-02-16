@@ -157,65 +157,195 @@ Both should return `200 OK` with a health status.
 
 ---
 
-## Testing Federation Between Servers
+## Testing Server A ↔ Server B Communication
 
-### Register a User on Server B
+This section walks you through **8 progressive steps** to verify that both servers are running, can discover each other, and can exchange signed federated requests.
 
-First, generate an invite code (admin login required):
+### Step 1: Check Federation Health (Both Servers)
 
-```powershell
-# Login as admin
-$login = Invoke-RestMethod -Uri "http://localhost:9080/admin/login" -Method Post -Body '{"username":"admin","password":"password123"}' -ContentType "application/json"
-$token = $login.token
-
-# Generate invite code
-$invite = Invoke-RestMethod -Uri "http://localhost:9080/admin/invites/generate" -Method Post -Body '{"invite_type":"user","max_uses":-1}' -ContentType "application/json" -Headers @{Authorization="Bearer $token"}
-$code = $invite.invite_code
-Write-Host "Invite code: $code"
-
-# Register Alice using the invite code
-Invoke-RestMethod -Uri "http://localhost:9080/register" -Method Post -Body "{`"username`":`"alice`",`"password`":`"alice123`",`"display_name`":`"Alice`",`"invite_code`":`"$code`"}" -ContentType "application/json"
-```
-
-### Look Up Alice from Server A's Federation
+Verify both federation services are alive and reporting metrics:
 
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8081/federation/lookup?id=alice@localhost"
+# Server A federation health
+Write-Host "=== Server A Federation ===" -ForegroundColor Cyan
+Invoke-RestMethod -Uri "http://localhost:8081/federation/health"
+
+# Server B federation health
+Write-Host "=== Server B Federation ===" -ForegroundColor Cyan
+Invoke-RestMethod -Uri "http://localhost:9081/federation/health"
 ```
 
-> **Note:** This will return `401 Unauthorized` because the `/federation/lookup` endpoint is now protected by the `VerifySignatureMiddleware`. This proves the signed handshake is working — unsigned requests are rejected.
+✅ **Expected:** Both return JSON with `status`, `uptime`, `total_messages`, etc.
 
-### Run the Signed Request Test
+### Step 2: Check Identity Health (Both Servers)
+
+```powershell
+# Server A identity health
+Invoke-RestMethod -Uri "http://localhost:8080/health"
+
+# Server B identity health
+Invoke-RestMethod -Uri "http://localhost:9080/health"
+```
+
+✅ **Expected:** Both return `200 OK` with `healthy`.
+
+### Step 3: View Server Capabilities
+
+Each federation service advertises what features it supports:
+
+```powershell
+# Server A capabilities
+Write-Host "=== Server A Capabilities ===" -ForegroundColor Cyan
+Invoke-RestMethod -Uri "http://localhost:8081/federation/capabilities"
+
+# Server B capabilities
+Write-Host "=== Server B Capabilities ===" -ForegroundColor Cyan
+Invoke-RestMethod -Uri "http://localhost:9081/federation/capabilities"
+```
+
+✅ **Expected:** Both return JSON listing supported activity types and protocol versions.
+
+### Step 4: Get Server Identity & Keys
+
+Each server has a unique identity (server ID, name, Ed25519 public key):
+
+```powershell
+# Server A identity info
+Write-Host "=== Server A Identity ===" -ForegroundColor Green
+$serverA = Invoke-RestMethod -Uri "http://localhost:8080/server/info"
+$serverA
+
+# Server B identity info
+Write-Host "=== Server B Identity ===" -ForegroundColor Green
+$serverB = Invoke-RestMethod -Uri "http://localhost:9080/server/info"
+$serverB
+```
+
+✅ **Expected:** Each returns `server_id`, `server_name`, `public_key`, `version`.
+
+### Step 5: Create Users on Both Servers
+
+Register a user on each server for cross-server lookup testing:
+
+```powershell
+# --- Register Alice on Server B ---
+$loginB = Invoke-RestMethod -Uri "http://localhost:9080/admin/login" -Method Post -Body '{"username":"admin","password":"password123"}' -ContentType "application/json"
+$tokenB = $loginB.token
+$inviteB = Invoke-RestMethod -Uri "http://localhost:9080/admin/invites/generate" -Method Post -Body '{"invite_type":"user","max_uses":-1}' -ContentType "application/json" -Headers @{Authorization="Bearer $tokenB"}
+Invoke-RestMethod -Uri "http://localhost:9080/register" -Method Post -Body "{`"username`":`"alice`",`"password`":`"alice123`",`"invite_code`":`"$($inviteB.invite_code)`"}" -ContentType "application/json"
+Write-Host "Alice registered on Server B" -ForegroundColor Green
+
+# --- Register Bob on Server A ---
+$loginA = Invoke-RestMethod -Uri "http://localhost:8080/admin/login" -Method Post -Body '{"username":"admin","password":"password123"}' -ContentType "application/json"
+$tokenA = $loginA.token
+$inviteA = Invoke-RestMethod -Uri "http://localhost:8080/admin/invites/generate" -Method Post -Body '{"invite_type":"user","max_uses":-1}' -ContentType "application/json" -Headers @{Authorization="Bearer $tokenA"}
+Invoke-RestMethod -Uri "http://localhost:8080/register" -Method Post -Body "{`"username`":`"bob`",`"password`":`"bob123`",`"invite_code`":`"$($inviteA.invite_code)`"}" -ContentType "application/json"
+Write-Host "Bob registered on Server A" -ForegroundColor Green
+```
+
+✅ **Expected:** Both return `user_id`, `home_server`, and `recovery_key`.
+
+### Step 6: Test Unsigned Lookup (Should Fail — 401)
+
+Try to look up Alice on Server B's federation endpoint **without** a signature:
+
+```powershell
+try {
+    Invoke-RestMethod -Uri "http://localhost:9081/federation/lookup?id=alice@localhost"
+} catch {
+    Write-Host "Status: $($_.Exception.Response.StatusCode)" -ForegroundColor Yellow
+    Write-Host "This is EXPECTED - unsigned requests are rejected by the signature middleware" -ForegroundColor Green
+}
+```
+
+✅ **Expected:** `401 Unauthorized` — this proves the **VerifySignatureMiddleware** is working. Unsigned requests are rejected.
+
+### Step 7: Establish Trust (Automatic Handshake)
+
+Server A initiates a handshake with Server B — both servers automatically exchange public keys:
+
+```powershell
+# Server A initiates handshake with Server B
+Invoke-RestMethod -Uri "http://localhost:8081/federation/handshake/initiate" -Method Post -Body '{"target_server":"http://server-b-federation:8081"}' -ContentType "application/json"
+```
+
+✅ **Expected:** Returns `"Handshake complete — mutual trust established"` with both servers' identities and `"status": "trusted"`.
+
+Verify the trust was stored:
+
+```powershell
+# Check Server A's trusted peers
+docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a -c "SELECT server_id, server_name FROM trusted_servers;"
+
+# Check Server B's trusted peers
+docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b -c "SELECT server_id, server_name FROM trusted_servers;"
+```
+
+✅ **Expected:** Each database shows the other server's entry.
+
+### Step 8: Run the Signed Request Test
+
+This test generates a signed federated lookup request and sends it to Server B:
 
 ```powershell
 go run ./cmd/signtest/
 ```
 
-This generates a signed request from a simulated "Server A" and sends it to Server B. Expected result: `401` (the test key isn't registered in Server B's DB — proving the middleware correctly rejects unknown signers).
+✅ **Expected output:**
+- `401 Unauthorized` → The test uses a **fresh key pair** (not registered in Server B). This proves the middleware correctly rejects unknown signers.
+- If you see `200 OK` → The request was signed with a known key and the lookup succeeded.
+
+### Step 9: Cross-Server Capability Discovery
+
+Server A can dynamically discover Server B's capabilities (and vice versa):
+
+```powershell
+# Server A discovers Server B's capabilities
+Write-Host "=== Server A discovers Server B ===" -ForegroundColor Cyan
+Invoke-RestMethod -Uri "http://localhost:8081/federation/discover" -Method Post -Body '{"server_url":"http://server-b-federation:8081"}' -ContentType "application/json"
+
+# Server B discovers Server A's capabilities  
+Write-Host "=== Server B discovers Server A ===" -ForegroundColor Cyan
+Invoke-RestMethod -Uri "http://localhost:9081/federation/discover" -Method Post -Body '{"server_url":"http://server-a-federation:8081"}' -ContentType "application/json"
+```
+
+> **Note:** The discover endpoint uses Docker internal hostnames (`server-a-federation`, `server-b-federation`) because the containers communicate over the Docker network, not `localhost`.
+
+✅ **Expected:** Each returns the other server's capability list.
+
+### Step 10: Send a Federated Activity
+
+Queue an activity from Server A to be delivered to Server B:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8081/federation/send" -Method Post -Body '{
+    "activity_type": "Follow",
+    "actor_id": "bob@localhost",
+    "target_server": "http://server-b-federation:8081",
+    "target_id": "alice@localhost",
+    "payload": {"message": "Bob wants to follow Alice"}
+}' -ContentType "application/json"
+```
+
+✅ **Expected:** Returns `201 Created` with an `activity_id`, meaning the activity has been queued for delivery to Server B.
+
+Check Server A's outbox to confirm:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8081/federation/outbox"
+```
 
 ---
 
-## Making Server A Successfully Query Server B
+### Quick Communication Health Check (One-Liner)
 
-For Server A to actually retrieve Alice's profile from Server B, Server A's public key must be registered in Server B's database:
-
-**1. Get Server A's public key:**
+Run this to quickly verify all 4 services are responding:
 
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8080/server/info"
+@("http://localhost:8080/health", "http://localhost:9080/health", "http://localhost:8081/federation/health", "http://localhost:9081/federation/health") | ForEach-Object { Write-Host "$_ -> " -NoNewline; try { $r = Invoke-WebRequest -Uri $_ -UseBasicParsing; Write-Host $r.StatusCode -ForegroundColor Green } catch { Write-Host "FAIL" -ForegroundColor Red } }
 ```
 
-Copy the `public_key` value from the response.
-
-**2. Insert Server A's key into Server B's database:**
-
-```powershell
-docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b -c "INSERT INTO identities (id, user_id, home_server, public_key, key_version, recovery_key_hash, allow_discovery, created_at, updated_at) VALUES (gen_random_uuid(), 'SERVER_A_ID', 'http://localhost:8080', 'PASTE_PUBLIC_KEY_HERE', 1, '', true, NOW(), NOW());"
-```
-
-Replace `SERVER_A_ID` with Server A's `server_id` and `PASTE_PUBLIC_KEY_HERE` with the public key.
-
-**3. Now signed requests from Server A will be accepted by Server B.**
+✅ **Expected:** All 4 URLs return `200`.
 
 ---
 

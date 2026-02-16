@@ -31,6 +31,8 @@ func main() {
 	log.Println("  GET    /federation/capabilities   - Get server capabilities")
 	log.Println("  POST   /federation/discover       - Discover remote capabilities")
 	log.Println("  GET    /federation/health         - Get instance health status")
+	log.Println("  POST   /federation/handshake      - Receive handshake from remote server")
+	log.Println("  POST   /federation/handshake/init - Initiate handshake with remote server")
 	log.Println("  GET    /federation/admin/blocks   - List blocked servers")
 	log.Println("  POST   /federation/admin/blocks   - Block a server")
 	log.Println("  DELETE /federation/admin/blocks   - Unblock a server")
@@ -58,6 +60,10 @@ func registerHandlers() {
 
 	// Health endpoint
 	http.HandleFunc("/federation/health", HealthHandler)
+
+	// Federation Handshake (automatic key exchange)
+	http.HandleFunc("/federation/handshake", HandshakeHandler)
+	http.HandleFunc("/federation/handshake/initiate", InitiateHandshakeHandler)
 
 	// Admin endpoints
 	http.HandleFunc("/federation/admin/blocks", BlockedServersHandler)

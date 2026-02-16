@@ -46,7 +46,7 @@
 | Postgres             | localhost:5432              |
 
 ---
-
+    
 ## Quick Start (One Command)
 
 ```bash

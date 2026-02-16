@@ -258,6 +258,38 @@ func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DeleteUserHandler handles user deletion
+func DeleteUserHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		RespondWithError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+
+	// Auth is handled by middleware
+
+	err := DeleteUser(userID)
+	if err != nil {
+		log.Println("Failed to delete user:", err)
+		if err.Error() == "user not found" {
+			RespondWithError(w, http.StatusNotFound, "user not found")
+		} else {
+			RespondWithError(w, http.StatusInternalServerError, "failed to delete user")
+		}
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{
+		"message": "user deleted successfully",
+		"user_id": userID,
+	})
+}
+
 // GetStatsHandler retrieves server statistics
 func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

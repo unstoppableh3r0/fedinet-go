@@ -272,8 +272,32 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if profile == nil {
-		RespondWithError(w, http.StatusInternalServerError, "profile missing (integrity error)")
-		return
+		log.Printf("⚠️ Profile missing for user %s. Auto-healing...", internalID)
+		// Auto-heal: Create default profile
+		_, err := db.Exec(`
+			INSERT INTO profiles (
+				user_id, display_name, bio, location, 
+				followers_visibility, following_visibility, created_at, updated_at, version
+			) VALUES (
+				$1, $1, 'Just joined Gotham Social', 'Unknown',
+				'public', 'public', NOW(), NOW(), 1
+			)
+			ON CONFLICT (user_id) DO NOTHING
+		`, internalID)
+
+		if err != nil {
+			log.Printf("Failed to auto-heal profile: %v", err)
+			RespondWithError(w, http.StatusInternalServerError, "profile missing (healing failed)")
+			return
+		}
+
+		// Fetch again
+		profile, err = GetProfileByUserID(internalID)
+		if err != nil || profile == nil {
+			log.Printf("Failed to fetch profile after healing: %v", err)
+			RespondWithError(w, http.StatusInternalServerError, "profile missing (integrity error)")
+			return
+		}
 	}
 
 	// Map Internal IDs to External Display IDs

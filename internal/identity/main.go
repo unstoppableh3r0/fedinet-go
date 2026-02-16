@@ -177,6 +177,7 @@ func main() {
 	// Admin Stats & Users List (Missing in previous context but requested by user)
 	http.Handle("/admin/stats", adminMiddleware(http.HandlerFunc(GetStatsHandler)))
 	http.Handle("/admin/users/list", adminMiddleware(http.HandlerFunc(GetAllUsersHandler)))
+	http.Handle("/admin/users/delete", adminMiddleware(http.HandlerFunc(DeleteUserHandler)))
 
 	http.HandleFunc("/invite/validate", func(w http.ResponseWriter, r *http.Request) {
 		// Public endpoint, but needs server info.

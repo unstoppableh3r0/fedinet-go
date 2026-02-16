@@ -7,6 +7,123 @@ import (
 // ApplyMigrations applies schema changes to the current database
 func ApplyMigrations() {
 	schemas := []string{
+		// Enable pgcrypto extension
+		`CREATE EXTENSION IF NOT EXISTS pgcrypto;`,
+
+		// Identities Table
+		`CREATE TABLE IF NOT EXISTS identities (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			did TEXT,
+			user_id TEXT NOT NULL UNIQUE,
+			home_server TEXT NOT NULL,
+			public_key TEXT,
+			private_key TEXT,
+			key_version INT DEFAULT 1,
+			recovery_key_hash TEXT,
+			password_hash TEXT,
+			allow_discovery BOOLEAN DEFAULT true,
+			signature TEXT,
+			metadata JSONB,
+			created_at TIMESTAMP DEFAULT now(),
+			updated_at TIMESTAMP DEFAULT now()
+		);`,
+
+		// Profiles Table
+		`CREATE TABLE IF NOT EXISTS profiles (
+			user_id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL,
+			avatar_url TEXT,
+			banner_url TEXT,
+			bio TEXT,
+			portfolio_url TEXT,
+			birth_date DATE,
+			location TEXT,
+			followers_visibility TEXT DEFAULT 'public',
+			following_visibility TEXT DEFAULT 'public',
+			version INT DEFAULT 1,
+			created_at TIMESTAMP DEFAULT now(),
+			updated_at TIMESTAMP DEFAULT now(),
+			FOREIGN KEY (user_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// Posts Table
+		`CREATE TABLE IF NOT EXISTS posts (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			author TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT now(),
+			updated_at TIMESTAMP DEFAULT now(),
+			FOREIGN KEY (author) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// Activities Table
+		`CREATE TABLE IF NOT EXISTS activities (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			actor_id TEXT NOT NULL,
+			verb TEXT NOT NULL,
+			object_type TEXT,
+			object_id TEXT,
+			target_id TEXT,
+			payload JSONB,
+			created_at TIMESTAMP DEFAULT now(),
+			FOREIGN KEY (actor_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// Follows Table
+		`CREATE TABLE IF NOT EXISTS follows (
+			follower_user_id TEXT NOT NULL,
+			follower_home_server TEXT NOT NULL,
+			followee_user_id TEXT NOT NULL,
+			followee_home_server TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT now(),
+			updated_at TIMESTAMP DEFAULT now(),
+			PRIMARY KEY (follower_user_id, followee_user_id),
+			FOREIGN KEY (follower_user_id) REFERENCES identities(user_id) ON DELETE CASCADE,
+			FOREIGN KEY (followee_user_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// Messages Table
+		`CREATE TABLE IF NOT EXISTS messages (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			sender_id TEXT NOT NULL,
+			recipient_id TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT now(),
+			FOREIGN KEY (sender_id) REFERENCES identities(user_id) ON DELETE CASCADE,
+			FOREIGN KEY (recipient_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// Server Config Table
+		`CREATE TABLE IF NOT EXISTS server_config (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TIMESTAMP DEFAULT NOW(),
+			updated_by TEXT
+		);`,
+
+		// Server Identity Table (for Federation/Init)
+		`CREATE TABLE IF NOT EXISTS server_identity (
+			id INT PRIMARY KEY,
+			server_id UUID NOT NULL,
+			server_name TEXT NOT NULL,
+			public_key TEXT NOT NULL,
+			private_key_encrypted TEXT NOT NULL,
+			initialized BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// Admins Table
+		`CREATE TABLE IF NOT EXISTS admins (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			is_super_admin BOOLEAN DEFAULT FALSE,
+			created_by UUID,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+
 		// Likes Table
 		`CREATE TABLE IF NOT EXISTS likes (
 			user_id TEXT NOT NULL,
@@ -102,6 +219,10 @@ func ApplyMigrations() {
 			created_at TIMESTAMP DEFAULT NOW(),
 			FOREIGN KEY (recipient_id) REFERENCES identities(user_id) ON DELETE CASCADE
 		);`,
+
+		// Schema Updates for Notifications (Fix for missing columns)
+		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_id TEXT;`,
+		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS entity_id TEXT;`,
 	}
 
 	for _, schema := range schemas {

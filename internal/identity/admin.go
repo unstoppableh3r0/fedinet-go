@@ -325,6 +325,31 @@ func GetAllUsers() ([]models.UserDocument, error) {
 	return users, nil
 }
 
+// DeleteUser deletes a user and all associated data
+func DeleteUser(userID string) error {
+	if userID == "" {
+		return fmt.Errorf("user_id cannot be empty")
+	}
+
+	// Assuming cascade delete is set up in schema for related tables
+	// The schema shows ON DELETE CASCADE for profiles, posts, etc.
+	result, err := db.Exec("DELETE FROM identities WHERE user_id = $1", userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	return nil
+}
+
 // ============ Database Migration Functions ============
 
 // TestDatabaseConnection tests if a database connection string is valid

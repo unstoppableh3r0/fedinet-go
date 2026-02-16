@@ -7,7 +7,7 @@
 ## Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- `curl` available in your terminal (comes with Windows 10+)
+- PowerShell (comes with Windows 10+)
 
 ---
 
@@ -49,9 +49,9 @@
     
 ## Quick Start (One Command)
 
-```bash
+```powershell
 cd fedinet-go
-setup-federation.bat
+.\setup-federation.bat
 ```
 
 This script does everything below automatically. If you prefer manual steps, continue reading.
@@ -64,13 +64,13 @@ This script does everything below automatically. If you prefer manual steps, con
 
 If you've run Docker before with the old config, remove the old volume:
 
-```bash
+```powershell
 docker-compose -f docker-compose.federation.yml down -v
 ```
 
 ### Step 2: Start All Containers
 
-```bash
+```powershell
 cd fedinet-go
 docker-compose -f docker-compose.federation.yml up --build -d
 ```
@@ -91,49 +91,66 @@ Wait about 10 seconds for Postgres to initialize and create both databases (`fed
 
 Check readiness:
 
-```bash
+```powershell
 docker exec fedinet_postgres pg_isready -U postgres
 ```
 
-### Step 4: Run Federation Migrations
+### Step 4: Run Database Migrations
 
-The federation service needs its schema created manually:
+Both **identity** and **federation** schemas need to be applied to both databases:
 
-```bash
-# Server A database
-docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a < internal\federation\migrations.sql
+```powershell
+# Identity migrations (server initialization tables)
+Get-Content .\internal\identity\migrations\001_server_initialization.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\001_server_initialization.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 
-# Server B database
-docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b < internal\federation\migrations.sql
+# Core identity schema (users, profiles, posts, etc.)
+Get-Content .\internal\identity\migrations\002_core_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\002_core_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# Federation migrations
+Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 ```
 
 > **Note:** You may see `NOTICE: relation already exists` messages — that's fine.
 
-### Step 5: Initialize Both Servers
+### Step 5: Restart Identity Containers
+
+After applying migrations, restart the identity containers so they pick up the new tables:
+
+```powershell
+docker restart server_a_identity server_b_identity
+```
+
+Wait a few seconds, then check logs to confirm they started cleanly:
+
+```powershell
+docker logs server_a_identity --tail 5
+docker logs server_b_identity --tail 5
+```
+
+### Step 6: Initialize Both Servers
 
 Each server needs a one-time initialization that creates core tables, generates Ed25519 identity keys, and sets up the admin account.
 
 **Initialize Server A:**
 
-```bash
-curl -X POST http://localhost:8080/initialize ^
-  -H "Content-Type: application/json" ^
-  -d "{\"server_name\": \"Server A\", \"admin_username\": \"admin\", \"admin_password\": \"password123\"}"
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/initialize" -Method Post -Body '{"server_name":"Server A","admin_username":"admin","admin_password":"password123"}' -ContentType "application/json"
 ```
 
 **Initialize Server B:**
 
-```bash
-curl -X POST http://localhost:9080/initialize ^
-  -H "Content-Type: application/json" ^
-  -d "{\"server_name\": \"Server B\", \"admin_username\": \"admin\", \"admin_password\": \"password123\"}"
+```powershell
+Invoke-RestMethod -Uri "http://localhost:9080/initialize" -Method Post -Body '{"server_name":"Server B","admin_username":"admin","admin_password":"password123"}' -ContentType "application/json"
 ```
 
-### Step 6: Verify Both Servers Are Running
+### Step 7: Verify Both Servers Are Running
 
-```bash
-curl http://localhost:8080/health
-curl http://localhost:9080/health
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/health"
+Invoke-RestMethod -Uri "http://localhost:9080/health"
 ```
 
 Both should return `200 OK` with a health status.
@@ -144,23 +161,33 @@ Both should return `200 OK` with a health status.
 
 ### Register a User on Server B
 
-```bash
-curl -X POST http://localhost:9080/register ^
-  -H "Content-Type: application/json" ^
-  -d "{\"username\": \"alice\", \"password\": \"alice123\", \"display_name\": \"Alice\"}"
+First, generate an invite code (admin login required):
+
+```powershell
+# Login as admin
+$login = Invoke-RestMethod -Uri "http://localhost:9080/admin/login" -Method Post -Body '{"username":"admin","password":"password123"}' -ContentType "application/json"
+$token = $login.token
+
+# Generate invite code
+$invite = Invoke-RestMethod -Uri "http://localhost:9080/admin/invites/generate" -Method Post -Body '{"invite_type":"user","max_uses":-1}' -ContentType "application/json" -Headers @{Authorization="Bearer $token"}
+$code = $invite.invite_code
+Write-Host "Invite code: $code"
+
+# Register Alice using the invite code
+Invoke-RestMethod -Uri "http://localhost:9080/register" -Method Post -Body "{`"username`":`"alice`",`"password`":`"alice123`",`"display_name`":`"Alice`",`"invite_code`":`"$code`"}" -ContentType "application/json"
 ```
 
 ### Look Up Alice from Server A's Federation
 
-```bash
-curl http://localhost:8081/federation/lookup?id=alice@localhost
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8081/federation/lookup?id=alice@localhost"
 ```
 
 > **Note:** This will return `401 Unauthorized` because the `/federation/lookup` endpoint is now protected by the `VerifySignatureMiddleware`. This proves the signed handshake is working — unsigned requests are rejected.
 
 ### Run the Signed Request Test
 
-```bash
+```powershell
 go run ./cmd/signtest/
 ```
 
@@ -174,17 +201,16 @@ For Server A to actually retrieve Alice's profile from Server B, Server A's publ
 
 **1. Get Server A's public key:**
 
-```bash
-curl http://localhost:8080/server/info
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/server/info"
 ```
 
 Copy the `public_key` value from the response.
 
 **2. Insert Server A's key into Server B's database:**
 
-```bash
-docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b -c ^
-  "INSERT INTO identities (id, user_id, home_server, public_key, key_version, recovery_key_hash, allow_discovery, created_at, updated_at) VALUES (gen_random_uuid(), 'SERVER_A_ID', 'http://localhost:8080', 'PASTE_PUBLIC_KEY_HERE', 1, '', true, NOW(), NOW());"
+```powershell
+docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b -c "INSERT INTO identities (id, user_id, home_server, public_key, key_version, recovery_key_hash, allow_discovery, created_at, updated_at) VALUES (gen_random_uuid(), 'SERVER_A_ID', 'http://localhost:8080', 'PASTE_PUBLIC_KEY_HERE', 1, '', true, NOW(), NOW());"
 ```
 
 Replace `SERVER_A_ID` with Server A's `server_id` and `PASTE_PUBLIC_KEY_HERE` with the public key.
@@ -195,7 +221,7 @@ Replace `SERVER_A_ID` with Server A's `server_id` and `PASTE_PUBLIC_KEY_HERE` wi
 
 ## Useful Commands
 
-```bash
+```powershell
 # View logs for all containers
 docker-compose -f docker-compose.federation.yml logs -f
 
@@ -226,6 +252,8 @@ docker exec -it fedinet_postgres psql -U postgres -d fedinet_server_a
 | Identity container exits | Check logs: `docker logs server_a_identity` — likely DB connection issue |
 | Federation migrations fail | Make sure Postgres is ready before running the SQL |
 | `401 Unauthorized` on lookup | This is correct — means the signature middleware is working |
+| `invalid credentials` on admin login | Ensure `ADMIN_USERNAME` and `ADMIN_PASSWORD` are set in `docker-compose.federation.yml` |
+| `invite usage limit reached` | Generate invite with `max_uses: -1` for unlimited uses |
 
 ---
 
@@ -238,3 +266,6 @@ docker exec -it fedinet_postgres psql -U postgres -d fedinet_server_a
 | `setup-federation.bat` | One-click setup script |
 | `internal/identity/Dockerfile` | Builds the identity service image |
 | `internal/federation/Dockerfile` | Builds the federation service image |
+| `internal/identity/migrations/001_server_initialization.sql` | Server identity, admins, invites tables |
+| `internal/identity/migrations/002_core_schema.sql` | Core tables: identities, profiles, posts, follows, etc. |
+| `internal/federation/migrations.sql` | Federation-specific tables |

@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Types from identity package (duplicated here since both are main packages)
+
 type Identity struct {
 	ID             string
 	UserID         string
@@ -36,30 +36,30 @@ type UserDocument struct {
 	Profile  Profile
 }
 
-// ResolveAccount finds an identity and profile by handle (local or remote)
+
 func ResolveAccount(handle string) (*UserDocument, error) {
 	if handle == "" {
 		return nil, fmt.Errorf("empty handle")
 	}
 
-	// 1. Parse Handle
+	
 	username, domain, err := parseHandle(handle)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. Check if local (no domain or localhost)
+	
 	if isLocalDomain(domain) {
 		return resolveLocalIdentity(username)
 	}
 
-	// 3. Remote Lookup
+	
 	return resolveRemoteIdentity(username, domain)
 }
 
 func parseHandle(handle string) (string, string, error) {
-	// format: username@domain or username
-	// remove leading @
+	
+	
 	handle = strings.TrimPrefix(handle, "@")
 	parts := strings.Split(handle, "@")
 	if len(parts) == 1 {
@@ -72,22 +72,22 @@ func parseHandle(handle string) (string, string, error) {
 }
 
 func isLocalDomain(domain string) bool {
-	// check internal server name env var?
-	// internal/identity uses "internal_server" const maybe?
-	// For now hardcode localhost checking
+	
+	
+	
 	return domain == "" || domain == "localhost" || domain == "localhost:8080" || domain == "localhost:8081"
 }
 
 func resolveLocalIdentity(username string) (*UserDocument, error) {
-	// Query local DB
-	// We need to ensure we look up by the full federated ID if that's how it's stored.
-	// In RegisterHandler, we store "username@localhost" (or whatever InternalServerName is).
-	// So if 'username' is just "alice", we might fail.
+	
+	
+	
+	
 
 	targetID := username
 	if !strings.Contains(username, "@") {
-		targetID = username + "@localhost" // Default to localhost for now
-		// TODO: Load from config
+		targetID = username + "@localhost" 
+		
 	}
 
 	var i Identity
@@ -99,13 +99,13 @@ func resolveLocalIdentity(username string) (*UserDocument, error) {
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Try without domain if first attempt failed?
-			// Or maybe the input WAS the full ID?
+			
+			
 			return nil, fmt.Errorf("identity not found")
 		}
 		return nil, err
 	}
-	// Fetch Profile
+	
 	var p Profile
 	err = db.QueryRow(`
 		SELECT user_id, display_name, bio, avatar_url, banner_url, created_at, updated_at
@@ -116,7 +116,7 @@ func resolveLocalIdentity(username string) (*UserDocument, error) {
 		return nil, fmt.Errorf("failed to fetch profile: %w", err)
 	}
 
-	// Create UserDocument
+	
 	doc := &UserDocument{
 		Identity: i,
 		Profile:  p,
@@ -125,10 +125,10 @@ func resolveLocalIdentity(username string) (*UserDocument, error) {
 }
 
 func resolveRemoteIdentity(username, domain string) (*UserDocument, error) {
-	// 1. Construct Federated ID
+	
 	federatedID := username + "@" + domain
 
-	// 2. Check Cache (DB)
+	
 	var i Identity
 	err := db.QueryRow(`
 		SELECT id, user_id, home_server, public_key, allow_discovery, created_at, updated_at
@@ -136,33 +136,33 @@ func resolveRemoteIdentity(username, domain string) (*UserDocument, error) {
 	`, federatedID).Scan(&i.ID, &i.UserID, &i.HomeServer, &i.PublicKey, &i.AllowDiscovery, &i.CreatedAt, &i.UpdatedAt)
 
 	if err == nil {
-		// Cache Hit
-		// Check for Staleness (e.g., 24 hours)
-		// For MVP, if it exists, valid enough.
-		// logic: if time.Since(i.UpdatedAt) < 24 * time.Hour { return &i, nil }
-		// Check keys for profile
-		// Basic cache implementation
-		// For now return identity with empty profile if not cached?
-		// Or assume if identity is cached, we should try to fetch profile.
+		
+		
+		
+		
+		
+		
+		
+		
 		return &UserDocument{Identity: i, Profile: Profile{UserID: i.UserID, DisplayName: username}}, nil
 	}
 
-	// 3. Cache Miss - Fetch Remote (Stub)
-	// In a real implementation:
-	// a. WebFinger lookup to get Actor URL
-	// b. Fetch Actor JSON
-	// c. Parse Public Key
+	
+	
+	
+	
+	
 
-	// Simulating Discovery of a valid remote user
-	// We'll generate a dummy one for demonstration purposes if domain is "remote.com"
+	
+	
 	if domain == "remote.com" || domain == "example.com" {
 		log.Printf("Simulating remote fetch for %s", federatedID)
 
-		// Generate new identity
-		// We need a UUID
+		
+		
 		newID := uuid.New()
 
-		// Dummy/Simulated Key (In reality, we'd fetch this)
+		
 		remotePub := "simulated-remote-public-key-for-" + federatedID
 
 		_, err = db.Exec(`
@@ -175,7 +175,7 @@ func resolveRemoteIdentity(username, domain string) (*UserDocument, error) {
 			return nil, fmt.Errorf("failed to cache remote identity: %w", err)
 		}
 
-		// Recurse to return the stored object locally
+		
 		return resolveRemoteIdentity(username, domain)
 	}
 

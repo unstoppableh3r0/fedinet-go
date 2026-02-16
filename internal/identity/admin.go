@@ -13,32 +13,32 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
-// Admin JWT Claims
+
 type AdminClaims struct {
 	Username string `json:"username"`
 	IsAdmin  bool   `json:"is_admin"`
 	jwt.RegisteredClaims
 }
 
-// Admin login credentials
+
 type AdminLoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-// Server configuration
+
 type ServerConfig struct {
 	ServerName string    `json:"server_name"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	UpdatedBy  string    `json:"updated_by"`
 }
 
-// Database migration request
+
 type MigrationRequest struct {
 	NewConnectionString string `json:"new_connection_string"`
 }
 
-// Migration status
+
 type MigrationStatus struct {
 	ID             string                 `json:"id"`
 	FromDB         string                 `json:"from_db"`
@@ -50,7 +50,7 @@ type MigrationStatus struct {
 	CompletedAt    *time.Time             `json:"completed_at"`
 }
 
-// Server statistics
+
 type ServerStats struct {
 	TotalUsers      int    `json:"total_users"`
 	TotalPosts      int    `json:"total_posts"`
@@ -61,7 +61,7 @@ type ServerStats struct {
 	Uptime          string `json:"uptime"`
 }
 
-// Notification model
+
 type Notification struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
@@ -72,9 +72,9 @@ type Notification struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ============ Authentication Functions ============
 
-// ValidateAdminCredentials checks if the provided credentials are valid
+
+
 func ValidateAdminCredentials(username, password string) bool {
 	adminUser := os.Getenv("ADMIN_USERNAME")
 	adminPass := os.Getenv("ADMIN_PASSWORD")
@@ -87,7 +87,7 @@ func ValidateAdminCredentials(username, password string) bool {
 	return username == adminUser && password == adminPass
 }
 
-// GenerateJWT creates a new JWT token for admin
+
 func GenerateJWT(username string) (string, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
@@ -108,7 +108,7 @@ func GenerateJWT(username string) (string, error) {
 	return token.SignedString([]byte(jwtSecret))
 }
 
-// ValidateJWT validates a JWT token and returns the claims
+
 func ValidateJWT(tokenString string) (*AdminClaims, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
@@ -133,9 +133,9 @@ func ValidateJWT(tokenString string) (*AdminClaims, error) {
 	return nil, fmt.Errorf("invalid token")
 }
 
-// ============ Server Configuration Functions ============
 
-// GetServerConfig retrieves the current server configuration
+
+
 func GetServerConfig() (*ServerConfig, error) {
 	var config ServerConfig
 
@@ -146,7 +146,7 @@ func GetServerConfig() (*ServerConfig, error) {
 	`).Scan(&config.ServerName, &config.UpdatedAt, &config.UpdatedBy)
 
 	if err == sql.ErrNoRows {
-		// Return default from environment
+		
 		config.ServerName = os.Getenv("SERVER_NAME")
 		if config.ServerName == "" {
 			config.ServerName = "localhost"
@@ -163,8 +163,8 @@ func GetServerConfig() (*ServerConfig, error) {
 	return &config, nil
 }
 
-// UpdateServerName updates the server name and notifies all users
-// UpdateServerName updates the server name and notifies all users
+
+
 func UpdateServerName(newName, updatedBy string) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -172,7 +172,7 @@ func UpdateServerName(newName, updatedBy string) error {
 	}
 	defer tx.Rollback()
 
-	// Update server config
+	
 	_, err = tx.Exec(`
 		INSERT INTO server_config (key, value, updated_by, updated_at)
 		VALUES ('server_name', $1, $2, NOW())
@@ -184,7 +184,7 @@ func UpdateServerName(newName, updatedBy string) error {
 		return fmt.Errorf("failed to update server config: %v", err)
 	}
 
-	// Notify all users about server name change
+	
 	err = NotifyAllUsersInTx(tx, "Server Name Updated",
 		fmt.Sprintf("The server name has been changed to: %s. Your username is now username@%s", newName, newName),
 		"server_change")
@@ -196,7 +196,7 @@ func UpdateServerName(newName, updatedBy string) error {
 	return tx.Commit()
 }
 
-// NotifyAllUsers creates a notification for all users
+
 func NotifyAllUsers(title, message, notifType string) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -212,19 +212,19 @@ func NotifyAllUsers(title, message, notifType string) error {
 	return tx.Commit()
 }
 
-// NotifyAllUsersInTx creates notifications within a transaction
-func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
-	// Adapted to new schema: recipient_id, actor_id, type, entity_id (used for message here?)
-	// We don't have title/message columns anymore.
-	// We can put title/message in a JSON payload if we add a payload column, or just use type/entity_id.
-	// For now, let's map title/message to entity_id or drop them?
-	// The new schema is: recipient_id, actor_id, type, entity_id.
-	// Let's use 'admin' as actor_id.
 
-	// Assuming entity_id can store the message for SYSTEM notifications?
-	// Or we should update schema to include payload.
-	// For this fix: I'll put the message in entity_id for simplicity or skip implementation if not critical.
-	// User requested "Notification of follow, likes, comments". This system notification is for admin.
+func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
+	
+	
+	
+	
+	
+	
+
+	
+	
+	
+	
 
 	_, err := tx.Exec(`
 		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, is_read, created_at)
@@ -235,35 +235,35 @@ func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
 	return err
 }
 
-// GetServerStats retrieves server statistics
+
 func GetServerStats() (*ServerStats, error) {
 	stats := &ServerStats{}
 
-	// Get user count
+	
 	err := db.QueryRow("SELECT COUNT(*) FROM identities").Scan(&stats.TotalUsers)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get post count
+	
 	err = db.QueryRow("SELECT COUNT(*) FROM posts").Scan(&stats.TotalPosts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get activity count
+	
 	err = db.QueryRow("SELECT COUNT(*) FROM activities").Scan(&stats.TotalActivities)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get follows count
+	
 	err = db.QueryRow("SELECT COUNT(*) FROM follows").Scan(&stats.TotalFollows)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get server name
+	
 	config, err := GetServerConfig()
 	if err != nil {
 		stats.ServerName = "unknown"
@@ -271,7 +271,7 @@ func GetServerStats() (*ServerStats, error) {
 		stats.ServerName = config.ServerName
 	}
 
-	// Test database connection
+	
 	err = db.Ping()
 	if err != nil {
 		stats.DatabaseStatus = "disconnected"
@@ -279,12 +279,12 @@ func GetServerStats() (*ServerStats, error) {
 		stats.DatabaseStatus = "connected"
 	}
 
-	stats.Uptime = "N/A" // TODO: Implement uptime tracking
+	stats.Uptime = "N/A" 
 
 	return stats, nil
 }
 
-// GetAllUsers retrieves all users with basic info
+
 func GetAllUsers() ([]models.UserDocument, error) {
 	rows, err := db.Query(`
 		SELECT 
@@ -325,9 +325,52 @@ func GetAllUsers() ([]models.UserDocument, error) {
 	return users, nil
 }
 
-// ============ Database Migration Functions ============
 
-// TestDatabaseConnection tests if a database connection string is valid
+func GetSuggestedUsers(limit int) ([]models.UserDocument, error) {
+	rows, err := db.Query(`
+		SELECT 
+			i.id, i.user_id, i.home_server, i.public_key, i.allow_discovery, i.created_at, i.updated_at,
+			p.user_id, p.display_name, p.avatar_url, p.banner_url, p.bio, p.portfolio_url, 
+			p.birth_date, p.location, p.followers_visibility, p.following_visibility, 
+			p.created_at, p.updated_at
+		FROM identities i
+		LEFT JOIN profiles p ON i.user_id = p.user_id
+		WHERE i.allow_discovery = true
+		ORDER BY i.created_at DESC
+		LIMIT $1
+	`, limit)
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []models.UserDocument
+	for rows.Next() {
+		var doc models.UserDocument
+		err := rows.Scan(
+			&doc.Identity.ID, &doc.Identity.UserID, &doc.Identity.HomeServer,
+			&doc.Identity.PublicKey, &doc.Identity.AllowDiscovery,
+			&doc.Identity.CreatedAt, &doc.Identity.UpdatedAt,
+			&doc.Profile.UserID, &doc.Profile.DisplayName,
+			&doc.Profile.AvatarURL, &doc.Profile.BannerURL, &doc.Profile.Bio,
+			&doc.Profile.PortfolioURL, &doc.Profile.BirthDate, &doc.Profile.Location,
+			&doc.Profile.FollowersVisibility, &doc.Profile.FollowingVisibility,
+			&doc.Profile.CreatedAt, &doc.Profile.UpdatedAt,
+		)
+		if err != nil {
+			log.Println("Error scanning user:", err)
+			continue
+		}
+		users = append(users, doc)
+	}
+
+	return users, nil
+}
+
+
+
+
 func TestDatabaseConnection(connectionString string) error {
 	testDB, err := sql.Open("postgres", connectionString)
 	if err != nil {
@@ -343,7 +386,7 @@ func TestDatabaseConnection(connectionString string) error {
 	return nil
 }
 
-// CreateSchemaOnNewDB creates all necessary tables on a new database
+
 func CreateSchemaOnNewDB(newDB *sql.DB) error {
 	schema := `
 		-- Enable extensions
@@ -515,9 +558,9 @@ func CreateSchemaOnNewDB(newDB *sql.DB) error {
 	return err
 }
 
-// MigrateDatabase performs the complete database migration
+
 func MigrateDatabase(newConnectionString string) (string, error) {
-	// Create migration record
+	
 	migrationID := uuid.New().String()
 	currentDB := os.Getenv("DATABASE_URL")
 
@@ -530,18 +573,18 @@ func MigrateDatabase(newConnectionString string) (string, error) {
 		return "", fmt.Errorf("failed to create migration record: %w", err)
 	}
 
-	// This should be run as a background job in production
+	
 	go performMigration(migrationID, currentDB, newConnectionString)
 
 	return migrationID, nil
 }
 
-// performMigration executes the migration process
+
 func performMigration(migrationID, fromDB, toDB string) {
-	// Update status to in_progress
+	
 	db.Exec(`UPDATE migration_status SET status = 'in_progress' WHERE id = $1`, migrationID)
 
-	// Open connection to new database
+	
 	newDB, err := sql.Open("postgres", toDB)
 	if err != nil {
 		recordMigrationError(migrationID, fmt.Sprintf("Failed to connect to new database: %v", err))
@@ -549,14 +592,14 @@ func performMigration(migrationID, fromDB, toDB string) {
 	}
 	defer newDB.Close()
 
-	// Create schema on new database
+	
 	err = CreateSchemaOnNewDB(newDB)
 	if err != nil {
 		recordMigrationError(migrationID, fmt.Sprintf("Failed to create schema: %v", err))
 		return
 	}
 
-	// Migrate data from each table
+	
 	tables := []string{"identities", "profiles", "posts", "activities", "follows", "messages", "server_config", "notifications"}
 	tableStatus := make(map[string]interface{})
 
@@ -569,12 +612,12 @@ func performMigration(migrationID, fromDB, toDB string) {
 		}
 		tableStatus[table] = "success"
 
-		// Update progress
+		
 		statusJSON, _ := json.Marshal(tableStatus)
 		db.Exec(`UPDATE migration_status SET tables_migrated = $1 WHERE id = $2`, statusJSON, migrationID)
 	}
 
-	// Mark migration as completed
+	
 	statusJSON, _ := json.Marshal(tableStatus)
 	db.Exec(`
 		UPDATE migration_status 
@@ -585,9 +628,9 @@ func performMigration(migrationID, fromDB, toDB string) {
 	log.Printf("Migration %s completed successfully", migrationID)
 }
 
-// copyTableData copies all data from one table to another
+
 func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
-	// Get all data from source table
+	
 	rows, err := fromDB.Query(fmt.Sprintf("SELECT * FROM %s", tableName))
 	if err != nil {
 		return err
@@ -599,7 +642,7 @@ func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
 		return err
 	}
 
-	// Prepare insert statement
+	
 	placeholders := ""
 	for i := range columns {
 		if i > 0 {
@@ -613,7 +656,7 @@ func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
 		joinColumns(columns),
 		placeholders)
 
-	// Copy each row
+	
 	for rows.Next() {
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
@@ -635,7 +678,7 @@ func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
 	return rows.Err()
 }
 
-// joinColumns joins column names with commas
+
 func joinColumns(columns []string) string {
 	result := ""
 	for i, col := range columns {
@@ -647,7 +690,7 @@ func joinColumns(columns []string) string {
 	return result
 }
 
-// recordMigrationError records an error in the migration status
+
 func recordMigrationError(migrationID, errorMsg string) {
 	db.Exec(`
 		UPDATE migration_status 
@@ -657,7 +700,7 @@ func recordMigrationError(migrationID, errorMsg string) {
 	log.Printf("Migration %s failed: %s", migrationID, errorMsg)
 }
 
-// GetMigrationStatus retrieves the status of a migration
+
 func GetMigrationStatus(migrationID string) (*MigrationStatus, error) {
 	var status MigrationStatus
 	var tablesJSON []byte
@@ -677,7 +720,7 @@ func GetMigrationStatus(migrationID string) (*MigrationStatus, error) {
 		return nil, err
 	}
 
-	// Parse tables migrated JSON
+	
 	if len(tablesJSON) > 0 {
 		json.Unmarshal(tablesJSON, &status.TablesMigrated)
 	}
@@ -685,24 +728,9 @@ func GetMigrationStatus(migrationID string) (*MigrationStatus, error) {
 	return &status, nil
 }
 
-// ============ Notification Functions ============
-// NOTE: These are replaced by social notification handlers in notification_handlers.go
-// but kept commented or adapted if needed for back-compat.
-// Since we changed the schema in migrations.go, these old functions would fail anyway.
 
-/*
-// GetUserNotifications retrieves notifications for a specific user
-func GetUserNotifications(userID string, limit int) ([]Notification, error) {
-...
-}
 
-// MarkNotificationAsRead marks a notification as read
-func MarkNotificationAsRead(notificationID, userID string) error {
-...
-}
 
-// GetUnreadNotificationCount gets the count of unread notifications
-func GetUnreadNotificationCount(userID string) (int, error) {
-...
-}
-*/
+
+
+

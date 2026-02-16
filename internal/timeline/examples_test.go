@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TestRankingModes demonstrates different ranking algorithms
+
 func TestRankingModes(t *testing.T) {
 	now := time.Now()
 
@@ -45,7 +45,7 @@ func TestRankingModes(t *testing.T) {
 	t.Run("Chronological Ranking", func(t *testing.T) {
 		ranked := RankPosts(posts, RankingModeChronological, "test-user")
 
-		// Most recent should be first
+		
 		if ranked[0].Post.ID != "3" {
 			t.Errorf("Expected post 3 first in chronological, got %s", ranked[0].Post.ID)
 		}
@@ -56,7 +56,7 @@ func TestRankingModes(t *testing.T) {
 	t.Run("Popular Ranking", func(t *testing.T) {
 		ranked := RankPosts(posts, RankingModePopular, "test-user")
 
-		// Highest engagement should be first
+		
 		if ranked[0].Post.ID != "1" {
 			t.Errorf("Expected post 1 first in popular, got %s", ranked[0].Post.ID)
 		}
@@ -70,7 +70,7 @@ func TestRankingModes(t *testing.T) {
 	t.Run("Trending Ranking", func(t *testing.T) {
 		ranked := RankPosts(posts, RankingModeTrending, "test-user")
 
-		// Post 2 should rank high due to recent high velocity
+		
 		t.Logf("Trending order: %s (score: %.2f), %s (score: %.2f), %s (score: %.2f)",
 			ranked[0].Post.ID, ranked[0].RankScore,
 			ranked[1].Post.ID, ranked[1].RankScore,
@@ -87,7 +87,7 @@ func TestRankingModes(t *testing.T) {
 	})
 }
 
-// TestActivityLevel demonstrates activity level calculation
+
 func TestActivityLevel(t *testing.T) {
 	now := time.Now()
 
@@ -129,7 +129,7 @@ func TestActivityLevel(t *testing.T) {
 	}
 }
 
-// TestDefaultConfigs demonstrates default configurations
+
 func TestDefaultConfigs(t *testing.T) {
 	t.Run("Default Offline Config", func(t *testing.T) {
 		config := DefaultOfflineConfig()
@@ -161,7 +161,7 @@ func TestDefaultConfigs(t *testing.T) {
 	})
 }
 
-// TestUtilityFunctions demonstrates utility functions
+
 func TestUtilityFunctions(t *testing.T) {
 	t.Run("Validate Ranking Mode", func(t *testing.T) {
 		validModes := []RankingMode{
@@ -206,7 +206,7 @@ func TestUtilityFunctions(t *testing.T) {
 
 	t.Run("Engagement Score", func(t *testing.T) {
 		score := CalculateEngagementScore(100, 50, 25)
-		expected := 100 + (50 * 2) + (25 * 3) // 100 + 100 + 75 = 275
+		expected := 100 + (50 * 2) + (25 * 3) 
 
 		if score != expected {
 			t.Errorf("Expected score %d, got %d", expected, score)
@@ -220,10 +220,10 @@ func TestUtilityFunctions(t *testing.T) {
 			input    int
 			expected int
 		}{
-			{0, 50},    // Default
-			{25, 25},   // Valid
-			{500, 200}, // Too large
-			{-10, 50},  // Invalid
+			{0, 50},    
+			{25, 25},   
+			{500, 200}, 
+			{-10, 50},  
 		}
 
 		for _, tt := range tests {
@@ -235,7 +235,7 @@ func TestUtilityFunctions(t *testing.T) {
 	})
 }
 
-// Example demonstrates how to use the timeline features
+
 func ExampleRankPosts() {
 	posts := []Post{
 		{
@@ -255,9 +255,9 @@ func ExampleRankPosts() {
 	}
 }
 
-// BenchmarkRankPosts benchmarks the ranking algorithm
+
 func BenchmarkRankPosts(b *testing.B) {
-	// Create sample posts
+	
 	posts := make([]Post, 100)
 	now := time.Now()
 

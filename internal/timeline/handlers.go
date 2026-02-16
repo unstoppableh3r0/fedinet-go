@@ -10,9 +10,9 @@ import (
 
 )
 
-// ============ Ranking Preference Handlers ============
 
-// GetRankingPreferenceHandler retrieves user's ranking preference
+
+
 func GetRankingPreferenceHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -39,7 +39,7 @@ func GetRankingPreferenceHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SetRankingPreferenceHandler sets user's ranking preference
+
 func SetRankingPreferenceHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -56,7 +56,7 @@ func SetRankingPreferenceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate ranking mode
+	
 	validModes := map[RankingMode]bool{
 		RankingModeChronological: true,
 		RankingModePopular:       true,
@@ -82,7 +82,7 @@ func SetRankingPreferenceHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetTimelineHandler retrieves timeline with applied ranking
+
 func GetTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -95,18 +95,18 @@ func GetTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get ranking mode (from query or user preference)
+	
 	rankingMode := RankingMode(r.URL.Query().Get("ranking_mode"))
 	if rankingMode == "" {
-		// Use user's saved preference
+		
 		var err error
 		rankingMode, err = GetUserRankingPreference(userID)
 		if err != nil {
-			rankingMode = RankingModeChronological // default
+			rankingMode = RankingModeChronological 
 		}
 	}
 
-	// Parse pagination
+	
 	limit := 50
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -120,17 +120,17 @@ func GetTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Record user activity
+	
 	_ = RecordUserActivity(userID)
 
-	// Fetch posts (this would normally query from posts table)
-	// For now, using mock data
+	
+	
 	posts := fetchTimelinePosts(userID, limit+offset)
 
-	// Apply ranking
+	
 	rankedPosts := RankPosts(posts, rankingMode, userID)
 
-	// Apply pagination
+	
 	total := len(rankedPosts)
 	if offset >= total {
 		rankedPosts = []RankedPost{}
@@ -153,9 +153,9 @@ func GetTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// ============ Post Versioning Handlers ============
 
-// EditPostHandler handles post editing with versioning
+
+
 func EditPostHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -174,7 +174,7 @@ func EditPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get current version number
+	
 	currentVersion, err := GetLatestVersionNumber(req.PostID)
 	if err != nil {
 		http.Error(w, "Failed to get version", http.StatusInternalServerError)
@@ -184,7 +184,7 @@ func EditPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	newVersion := currentVersion + 1
 
-	// Create version record
+	
 	if err := CreatePostVersion(req.PostID, req.EditorID, req.NewContent, newVersion, req.ChangeNote); err != nil {
 		http.Error(w, "Failed to create version", http.StatusInternalServerError)
 		log.Printf("Error creating version: %v", err)
@@ -199,7 +199,7 @@ func EditPostHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetPostVersionHistoryHandler retrieves version history for a post
+
 func GetPostVersionHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -227,7 +227,7 @@ func GetPostVersionHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetSpecificVersionHandler retrieves a specific version of a post
+
 func GetSpecificVersionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -258,9 +258,9 @@ func GetSpecificVersionHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(postVersion)
 }
 
-// ============ Offline Mode Handlers ============
 
-// CacheTimelineHandler caches timeline for offline access
+
+
 func CacheTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -276,16 +276,16 @@ func CacheTimelineHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user's offline config
+	
 	config, err := GetUserOfflineConfig(req.UserID)
 	if err != nil {
 		config = DefaultOfflineConfig()
 	}
 
-	// Fetch timeline posts
+	
 	posts := fetchTimelinePosts(req.UserID, config.MaxPostsPerUser)
 
-	// Cache the posts
+	
 	if err := CacheTimelineForUser(req.UserID, posts, config); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to cache timeline: %v", err), http.StatusInternalServerError)
 		return
@@ -299,7 +299,7 @@ func CacheTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetCachedTimelineHandler retrieves cached timeline
+
 func GetCachedTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -325,7 +325,7 @@ func GetCachedTimelineHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// RefreshCacheHandler refreshes cached content
+
 func RefreshCacheHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -341,7 +341,7 @@ func RefreshCacheHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch fresh timeline
+	
 	config, _ := GetUserOfflineConfig(req.UserID)
 	posts := fetchTimelinePosts(req.UserID, config.MaxPostsPerUser)
 
@@ -357,9 +357,9 @@ func RefreshCacheHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ============ Adaptive Refresh Handlers ============
 
-// GetRefreshIntervalHandler returns the adaptive refresh interval
+
+
 func GetRefreshIntervalHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -394,7 +394,7 @@ func GetRefreshIntervalHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateActivityHandler updates user activity timestamp
+
 func UpdateActivityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -421,7 +421,7 @@ func UpdateActivityHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// RecordServerLoadHandler records server load metrics
+
 func RecordServerLoadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -447,7 +447,7 @@ func RecordServerLoadHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetServerLoadHandler retrieves current server load level
+
 func GetServerLoadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -467,13 +467,13 @@ func GetServerLoadHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ============ Helper Functions ============
 
-// fetchTimelinePosts is a placeholder for fetching posts from the database
-// In production, this would query the posts table with joins to user data
+
+
+
 func fetchTimelinePosts(userID string, limit int) []Post {
-	// Mock data for demonstration
-	// In production, this would fetch from the database
+	
+	
 	posts := []Post{
 		{
 			ID:          "1",

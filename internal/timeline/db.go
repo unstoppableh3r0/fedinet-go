@@ -10,7 +10,7 @@ import (
 
 var db *sql.DB
 
-// InitDB initializes the database connection
+
 func InitDB() {
 	var err error
 	connStr := os.Getenv("DATABASE_URL")
@@ -30,7 +30,7 @@ func InitDB() {
 	log.Println("Timeline database connected successfully")
 }
 
-// GetDB returns the database instance
+
 func GetDB() *sql.DB {
 	return db
 }

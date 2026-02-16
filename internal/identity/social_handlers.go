@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-// GetFeedHandler returns posts from users that the current user follows
+
 func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -20,14 +20,14 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to internal format
+	
 	internalUserID := ToInternalID(userID)
 
-	// Get limit and offset for pagination
+	
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
-	limit := 20 // default
+	limit := 20 
 	offset := 0
 
 	if limitStr != "" {
@@ -42,7 +42,7 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get posts from followed users
+	
 	posts, err := GetFeedPosts(internalUserID, limit, offset)
 	if err != nil {
 		log.Printf("GetFeedHandler error for user %s: %v", internalUserID, err)
@@ -50,7 +50,7 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert author IDs to external format
+	
 	for i := range posts {
 		posts[i].Author = ToExternalID(posts[i].Author)
 	}
@@ -62,7 +62,7 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetFollowersHandler returns list of users following the specified user
+
 func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -84,7 +84,7 @@ func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to external format
+	
 	for i := range followers {
 		followers[i].Identity.UserID = ToExternalID(followers[i].Identity.UserID)
 		followers[i].Profile.UserID = ToExternalID(followers[i].Profile.UserID)
@@ -96,7 +96,7 @@ func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// RemoveFollowerHandler handles unfollow action (called /follower/remove by frontend)
+
 func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -104,8 +104,8 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID     string `json:"user_id"`     // Wrapper around identity.user_id (the one doing the removal/unfollowing)
-		FollowerID string `json:"follower_id"` // The one being removed/unfollowed
+		UserID     string `json:"user_id"`     
+		FollowerID string `json:"follower_id"` 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -113,15 +113,15 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Frontend sends: user_id (me), follower_id (them)
-	// If this is "Remove Follower" (block them from following me), it's different from "Unfollow" (I stop following them).
-	// The frontend button says "Remove". context: FollowersPage.
-	// "Remove" usually means "Force them to unfollow me".
-	// BUT, conventionally "Followers" list -> "Remove" means "Block/Remove follower".
-	// "Following" list -> "Unfollow".
-	// The frontend code: `handleRemoveFollower` in `FollowersPage`.
-	// logic: `user_id: identity.user_id` (ME), `follower_id: userId` (THEM).
-	// Backend needs to DELETE FROM follows WHERE follower=THEM AND followee=ME.
+	
+	
+	
+	
+	
+	
+	
+	
+	
 
 	if req.UserID == "" || req.FollowerID == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
@@ -131,8 +131,8 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	me := ToInternalID(req.UserID)
 	them := ToInternalID(req.FollowerID)
 
-	// Remove THEM from following ME
-	// follower_user_id = THEM, followee_user_id = ME
+	
+	
 	if err := UnfollowUser(them, me); err != nil {
 		log.Println("Remove follower failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "action failed")
@@ -142,7 +142,7 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "follower removed"})
 }
 
-// UnfollowHandler handles unfollow action (called /unfollow by frontend)
+
 func UnfollowHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -164,7 +164,7 @@ func UnfollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Unfollow: Follower (ME) stops following Followee (THEM)
+	
 	internalFollower := ToInternalID(req.Follower)
 	internalFollowee := ToInternalID(req.Followee)
 
@@ -187,7 +187,7 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 		UserID   string  `json:"user_id"`
 		PostID   string  `json:"post_id"`
 		Content  string  `json:"content"`
-		ParentID *string `json:"parent_id"` // Optional
+		ParentID *string `json:"parent_id"` 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -229,7 +229,7 @@ func GetPostRepliesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert UserIDs to external
+	
 	for i := range replies {
 		replies[i].UserID = ToExternalID(replies[i].UserID)
 	}
@@ -237,7 +237,7 @@ func GetPostRepliesHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{"replies": replies})
 }
 
-// GetFollowingHandler returns list of users that the specified user follows
+
 func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -259,7 +259,7 @@ func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to external format
+	
 	for i := range following {
 		following[i].Identity.UserID = ToExternalID(following[i].Identity.UserID)
 		following[i].Profile.UserID = ToExternalID(following[i].Profile.UserID)
@@ -271,7 +271,7 @@ func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetConversationsHandler returns list of message conversations for a user
+
 func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -293,7 +293,7 @@ func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert IDs to external format
+	
 	for i := range conversations {
 		conversations[i].Sender = ToExternalID(conversations[i].Sender)
 		conversations[i].Receiver = ToExternalID(conversations[i].Receiver)
@@ -305,7 +305,7 @@ func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetConversationMessagesHandler returns messages in a specific conversation
+
 func GetConversationMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -330,7 +330,7 @@ func GetConversationMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert IDs to external format
+	
 	for i := range messages {
 		messages[i].Sender = ToExternalID(messages[i].Sender)
 		messages[i].Receiver = ToExternalID(messages[i].Receiver)

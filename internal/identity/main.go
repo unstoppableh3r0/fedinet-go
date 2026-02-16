@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 )
 
 func main() {
 	InitDB()
 	ApplyMigrations()
 
-	// Global initialization state
+	// Start session key rotation and cleanup worker
+	go sessionKeyWorker()
+
 	var isInitialized bool
 	var err error
 	isInitialized, err = CheckInitializationStatus()
@@ -18,7 +21,6 @@ func main() {
 		log.Printf("⚠️  Error checking initialization status: %v", err)
 	}
 
-	// Middleware to check initialization
 	requireInit := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if !isInitialized {
@@ -29,49 +31,45 @@ func main() {
 		}
 	}
 
-	// Initialization Handler Wrapper
 	http.HandleFunc("/initialize", func(w http.ResponseWriter, r *http.Request) {
 		InitializeHandler(w, r)
-		// Update state on success check
+
 		if init, _ := CheckInitializationStatus(); init {
 			isInitialized = true
 			log.Println("✅ Server initialized successfully (Hot Reload)")
 		}
 	})
 
-	// Public Status Routes (Always available)
 	http.HandleFunc("/status", StatusHandler)
 	http.HandleFunc("/health", HealthCheckHandler)
 	http.HandleFunc("/server/info", GetServerInfoHandler)
 
-	// User Routes (Protected by Init Check)
 	http.HandleFunc("/follow", requireInit(FollowHandler))
 	http.HandleFunc("/message", requireInit(MessageHandler))
 	http.HandleFunc("/user/search", requireInit(UserSearchHandler))
-	http.HandleFunc("/register", requireInit(RegisterHandler))
-	http.HandleFunc("/login", requireInit(LoginHandler))
+	http.HandleFunc("/register", RegisterHandler)
+	http.HandleFunc("/login", LoginHandler)
 	http.HandleFunc("/user/me", requireInit(MeHandler))
 	http.HandleFunc("/profile/update", requireInit(UpdateProfileHandler))
 	http.HandleFunc("/post/create", requireInit(CreatePostHandler))
 	http.HandleFunc("/posts/user", requireInit(GetUserPostsHandler))
 
-	// Revocation
 	http.HandleFunc("/identity/revoke", requireInit(RevokeKeyHandler))
 	http.HandleFunc("/identity/revocations", requireInit(GetRevocationsHandler))
 
-	// Recovery & Blocking
+	http.HandleFunc("/posts/recent", requireInit(GetRecentPostsHandler))
+	http.HandleFunc("/users/suggested", requireInit(GetSuggestedUsersHandler))
+
 	http.HandleFunc("/identity/recover", requireInit(RecoverAccountHandler))
 	http.HandleFunc("/identity/block", requireInit(BlockUserHandler))
 	http.HandleFunc("/identity/unblock", requireInit(UnblockUserHandler))
 	http.HandleFunc("/identity/blocks", requireInit(GetBlocksHandler))
 
-	// Social Routes
 	http.HandleFunc("/post/like", requireInit(ToggleLikeHandler))
 	http.HandleFunc("/post/repost", requireInit(ToggleRepostHandler))
 	http.HandleFunc("/post/reply", requireInit(CreateReplyHandler))
 	http.HandleFunc("/post/replies", requireInit(GetPostRepliesHandler))
 
-	// Feed and Social Discovery
 	http.HandleFunc("/feed", requireInit(GetFeedHandler))
 	http.HandleFunc("/followers", requireInit(GetFollowersHandler))
 	http.HandleFunc("/following", requireInit(GetFollowingHandler))
@@ -80,14 +78,11 @@ func main() {
 	http.HandleFunc("/messages", requireInit(GetConversationsHandler))
 	http.HandleFunc("/messages/conversation", requireInit(GetConversationMessagesHandler))
 
-	// User notification routes
 	http.HandleFunc("/notifications", requireInit(GetNotificationsHandler))
 	http.HandleFunc("/notifications/read", requireInit(MarkNotificationsReadHandler))
 
-	// Admin routes (unprotected - but login needs init)
 	http.HandleFunc("/admin/login", requireInit(AdminLoginHandler))
 
-	// Admin routes (protected) - These have their own Auth Middleware, but we also check Init
 	adminMiddleware := func(h http.Handler) http.Handler {
 		return AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !isInitialized {
@@ -107,7 +102,6 @@ func main() {
 	})))
 	http.Handle("/admin/config/test-db", adminMiddleware(http.HandlerFunc(TestDatabaseHandler)))
 
-	// Invite Management
 	http.Handle("/admin/invites/generate", adminMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -174,14 +168,22 @@ func main() {
 		w.Write(png)
 	})))
 
-	// Admin Stats & Users List (Missing in previous context but requested by user)
 	http.Handle("/admin/stats", adminMiddleware(http.HandlerFunc(GetStatsHandler)))
 	http.Handle("/admin/users/list", adminMiddleware(http.HandlerFunc(GetAllUsersHandler)))
 
+	// Trusted Servers Management
+	http.Handle("/admin/trusted-servers/list", adminMiddleware(http.HandlerFunc(GetTrustedServersHandler)))
+	http.Handle("/admin/trusted-servers/add", adminMiddleware(http.HandlerFunc(AddTrustedServerHandler)))
+	http.Handle("/admin/trusted-servers/update", adminMiddleware(http.HandlerFunc(UpdateTrustedServerHandler)))
+	http.Handle("/admin/trusted-servers/remove", adminMiddleware(http.HandlerFunc(RemoveTrustedServerHandler)))
+	http.Handle("/admin/trusted-servers/key", adminMiddleware(http.HandlerFunc(GetServerPublicKeyHandler)))
+
+	// Federated Search
+	http.HandleFunc("/api/search", requireInit(FederatedSearchHandler))
+	http.HandleFunc("/api/users/", requireInit(GetPublicUserHandler))
+
 	http.HandleFunc("/invite/validate", func(w http.ResponseWriter, r *http.Request) {
-		// Public endpoint, but needs server info.
-		// If not initialized, ValidateInvite will likely fail or server info query will fail.
-		// We can allow it but it might return errors if DB empty.
+
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			RespondWithError(w, http.StatusBadRequest, "code required")
@@ -215,14 +217,33 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8082", enableCORS(http.DefaultServeMux)))
 }
 
+// sessionKeyWorker runs periodically to rotate expired keys and cleanup old ones
+func sessionKeyWorker() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	log.Println("Session key worker started")
+
+	for range ticker.C {
+		// Rotate expired keys
+		if err := RotateExpiredKeys(); err != nil {
+			log.Printf("Session key rotation error: %v", err)
+		}
+
+		// Cleanup old expired keys
+		if err := CleanupExpiredKeys(); err != nil {
+			log.Printf("Session key cleanup error: %v", err)
+		}
+	}
+}
+
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow all origins for dev
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		// Handle preflight requests
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return

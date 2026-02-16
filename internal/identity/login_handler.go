@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -29,14 +30,12 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Normalize username to internal ID format
 	req.Username = strings.ToLower(req.Username)
 	federatedUserID := req.Username
 	if !strings.Contains(req.Username, "@") {
 		federatedUserID = req.Username + "@" + InternalServerName
 	}
 
-	// Fetch user from database
 	var passwordHash string
 	var homeServer string
 	err := db.QueryRow(`
@@ -55,15 +54,28 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify password
 	if !CheckPasswordHash(req.Password, passwordHash) {
 		RespondWithError(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 
-	// Return user_id and home_server for frontend to store
+	// Generate Tokens
+	serverURL := os.Getenv("SERVER_URL")
+	if serverURL == "" {
+		serverURL = "http://localhost:8082"
+	}
+
+	accessToken, refreshToken, err := GenerateTokenPair(federatedUserID, serverURL)
+	if err != nil {
+		log.Println("Token generation failed:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to generate tokens")
+		return
+	}
+
 	RespondWithJSON(w, http.StatusOK, map[string]string{
-		"user_id":     ToExternalID(federatedUserID),
-		"home_server": homeServer,
+		"user_id":       ToExternalID(federatedUserID),
+		"home_server":   serverURL,
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
 	})
 }

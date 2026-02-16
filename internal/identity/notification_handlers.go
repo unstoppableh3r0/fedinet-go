@@ -11,12 +11,12 @@ type UserNotification struct {
 	ID        string    `json:"id"`
 	Recipient string    `json:"recipient_id"`
 	Actor     string    `json:"actor_id"`
-	Type      string    `json:"type"`      // FOLLOW, LIKE, REPLY, REPOST
-	EntityID  string    `json:"entity_id"` // Post ID or User ID
+	Type      string    `json:"type"`      
+	EntityID  string    `json:"entity_id"` 
 	IsRead    bool      `json:"is_read"`
 	CreatedAt time.Time `json:"created_at"`
 
-	// Enriched data for UI
+	
 	ActorName   string `json:"actor_name"`
 	ActorAvatar string `json:"actor_avatar,omitempty"`
 }
@@ -65,7 +65,7 @@ func GetNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		if displayName != nil {
 			n.ActorName = *displayName
 		} else {
-			n.ActorName = n.Actor // Fallback
+			n.ActorName = n.Actor 
 		}
 		if avatarURL != nil {
 			n.ActorAvatar = *avatarURL

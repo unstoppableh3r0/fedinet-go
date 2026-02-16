@@ -34,69 +34,69 @@ func (r *repository) ListPendingReports() ([]models.Report, error) {
 	return nil, nil
 }
 
-// GetReportByID fetches a single report.
+
 func (r *repository) GetReportByID(reportID int64) (*models.Report, error) {
-	return nil, nil // TODO: implement SQL SELECT
+	return nil, nil 
 }
 
-// ResolveReport marks a report as resolved.
+
 func (r *repository) ResolveReport(
 	reportID int64,
 	resolvedBy string,
 ) error {
-	return nil // TODO: implement SQL UPDATE
+	return nil 
 }
 
-// Malicious Server Blacklist
 
-// BlockServer inserts a server into the blacklist.
+
+
 func (r *repository) BlockServer(server *models.BlockedServer) error {
-	return nil // TODO: implement SQL INSERT
+	return nil 
 }
 
-// IsServerBlocked checks if a server is blacklisted.
+
 func (r *repository) IsServerBlocked(domain string) (bool, error) {
-	return false, nil // TODO: implement SQL SELECT EXISTS
+	return false, nil 
 }
 
-// ListBlockedServers returns all blocked servers.
+
 func (r *repository) ListBlockedServers() ([]models.BlockedServer, error) {
-	return nil, nil // TODO: implement SQL SELECT
+	return nil, nil 
 }
 
 
-// Federation Event Queue
 
-// EnqueueFederationEvent stores a governance event for later delivery.
+
+
 func (r *repository) EnqueueFederationEvent(event *models.FederationEvent) error {
-	return nil // TODO: implement SQL INSERT
+	return nil 
 }
 
-// ListPendingFederationEvents returns queued events.
+
 func (r *repository) ListPendingFederationEvents() ([]models.FederationEvent, error) {
-	return nil, nil // TODO: implement SQL SELECT
+	return nil, nil 
 }
 
-// IncrementFederationRetry updates retry metadata.
+
 func (r *repository) IncrementFederationRetry(
 	eventID int64,
 ) error {
-	return nil // TODO: implement SQL UPDATE
+	return nil 
 }
 
-// DeleteFederationEvent removes a delivered event.
+
 func (r *repository) DeleteFederationEvent(eventID int64) error {
-	return nil // TODO: implement SQL DELETE
+	return nil 
 }
 
-// Backup Metadata
 
-// SaveBackupMetadata records a backup snapshot.
+
+
 func (r *repository) SaveBackupMetadata(backup *models.BackupMetadata) error {
-	return nil // TODO: implement SQL INSERT
+	return nil 
 }
 
-// ListBackups returns stored backup records.
+
 func (r *repository) ListBackups() ([]models.BackupMetadata, error) {
-	return nil, nil // TODO: implement SQL SELECT
+	return nil, nil 
 }

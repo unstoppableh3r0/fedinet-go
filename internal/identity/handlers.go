@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
@@ -31,7 +33,6 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Normalize IDs to internal storage format
 	internalFollower := ToInternalID(req.Follower)
 	internalFollowee := ToInternalID(req.Followee)
 
@@ -96,7 +97,6 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Search request: original userID = %s", userID)
 
-	// Normalize incoming ID to find in DB
 	internalUserID := ToInternalID(userID)
 
 	log.Printf("Search request: converted to internalUserID = %s", internalUserID)
@@ -117,7 +117,6 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ REAL profile from PostgreSQL
 	profile, err := GetProfileByUserID(internalUserID)
 	if err != nil {
 		log.Printf("GetProfileByUserID error for user %s: %v", internalUserID, err)
@@ -129,11 +128,9 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map Internal IDs to External Display IDs for response
 	identity.UserID = ToExternalID(identity.UserID)
 	profile.UserID = ToExternalID(profile.UserID)
 
-	// Check if viewer follows this user
 	viewerID := r.URL.Query().Get("viewer_id")
 	isFollowing := false
 	if viewerID != "" && viewerID != userID {
@@ -164,9 +161,12 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username   string `json:"username"`
-		Password   string `json:"password"`
-		InviteCode string `json:"invite_code"`
+		Username        string `json:"username"`
+		Password        string `json:"password"`
+		Email           string `json:"email"`
+		InviteCode      string `json:"invite_code"`
+		HomeServer      string `json:"home_server"`
+		ClientPublicKey string `json:"client_public_key"` // New: client's Ed25519 public key
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -174,18 +174,18 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Username == "" {
-		RespondWithError(w, http.StatusBadRequest, "username required")
+	if req.Username == "" || req.Email == "" || req.Password == "" {
+		RespondWithError(w, http.StatusBadRequest, "username, email and password required")
 		return
 	}
 
 	// Validate invite code
+	req.InviteCode = strings.TrimSpace(req.InviteCode)
 	if req.InviteCode == "" {
 		RespondWithError(w, http.StatusForbidden, "invite code required")
 		return
 	}
 
-	// Check invite
 	invite, err := ValidateInvite(req.InviteCode)
 	if err != nil {
 		RespondWithError(w, http.StatusForbidden, "invalid or expired invite: "+err.Error())
@@ -196,54 +196,79 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate Username Format
 	if !ValidateUsername(req.Username) {
 		RespondWithError(w, http.StatusBadRequest, "invalid username format (alphanumeric, 3-30 chars)")
 		return
 	}
 
-	// Normalize
-	req.Username = strings.ToLower(req.Username)
+	federatedUserID := strings.ToLower(req.Username) + "@" + InternalServerName
+	if identity, err := GetIdentityByUserID(federatedUserID); err == nil && identity != nil {
+		RespondWithError(w, http.StatusConflict, "username taken")
+		return
+	}
 
-	// Always creating as localhost internal user
-	federatedUserID := req.Username + "@" + InternalServerName
-	homeServer := "http://localhost:8082"
-
-	recoveryKey, err := CreateAccount(federatedUserID, homeServer, req.Password)
+	// Hash password
+	hashedPassword, err := HashPassword(req.Password)
 	if err != nil {
-		log.Println("Registration failed:", err)
-		if err.Error() == "user already exists" {
-			RespondWithError(w, http.StatusConflict, "username taken")
-			return
-		}
-		RespondWithError(w, http.StatusInternalServerError, "internal registration error")
+		RespondWithError(w, http.StatusInternalServerError, "failed to hash password")
+		return
+	}
+
+	// Determine Home Server URL
+	homeServer := os.Getenv("SERVER_URL")
+	if homeServer == "" {
+		homeServer = "http://localhost:8082" // Default fallback
+	}
+
+	// Create Account with client public key
+	recoveryKey, err := CreateAccountWithClientKey(federatedUserID, homeServer, hashedPassword, req.ClientPublicKey)
+	if err != nil {
+		log.Println("CreateAccount error:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to create account")
 		return
 	}
 
 	// Mark invite as used
-	// We need the internal ID but CreateAccount returns recovery key, not ID.
-	// We can look it up or just pass the federated ID if UseInvite handles it.
-	// But UseInvite expects an ID suitable for `invite_usage` table (uuid).
-	// `CreateAccount` inserts into `identities`. We need to fetch the ID.
-	identity, _ := GetIdentityByUserID(federatedUserID)
-	var userID string
-	if identity != nil {
-		userID = identity.ID.String()
+	if err := UseInvite(req.InviteCode, federatedUserID, r.RemoteAddr, r.UserAgent()); err != nil {
+		log.Printf("Failed to mark invite %s as used: %v", req.InviteCode, err)
 	}
 
-	if err := UseInvite(req.InviteCode, userID, r.RemoteAddr, r.UserAgent()); err != nil {
-		log.Printf("Error marking invite used: %v", err)
+	// Generate session key for the new user
+	sessionKey, err := GenerateSessionKey(federatedUserID)
+	if err != nil {
+		log.Printf("Failed to generate session key for %s: %v", federatedUserID, err)
+		// Continue without session key for now
 	}
 
-	RespondWithJSON(w, http.StatusCreated, map[string]string{
-		"user_id":      ToExternalID(federatedUserID),
-		"home_server":  homeServer,
-		"recovery_key": recoveryKey,
-	})
+	// Generate Tokens
+	accessToken, refreshToken, err := GenerateTokenPair(federatedUserID, homeServer)
+	if err != nil {
+		log.Println("Token generation failed:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to generate tokens")
+		return
+	}
+
+	response := map[string]interface{}{
+		"user_id":       ToExternalID(federatedUserID),
+		"home_server":   homeServer,
+		"recovery_key":  recoveryKey,
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+	}
+
+	// Include session key if generated
+	if sessionKey != nil {
+		response["session_key_encrypted"] = sessionKey.SymmetricKeyEncrypted
+		response["session_key_signature"] = sessionKey.Signature
+		response["session_key_version"] = sessionKey.KeyVersion
+		response["session_key_expires_at"] = sessionKey.ExpiresAt.Format(time.RFC3339)
+	}
+
+	RespondWithJSON(w, http.StatusCreated, response)
 }
 
 func MeHandler(w http.ResponseWriter, r *http.Request) {
-	// 1. Get UserID from query param
+
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
 		RespondWithError(w, http.StatusUnauthorized, "unauthorized: missing user_id param")
@@ -252,7 +277,6 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 
 	internalID := ToInternalID(userID)
 
-	// 2. Fetch models.Identity
 	identity, err := GetIdentityByUserID(internalID)
 	if err != nil {
 		log.Printf("MeHandler: GetIdentityByUserID error for user %s: %v", internalID, err)
@@ -264,7 +288,6 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Fetch models.Profile
 	profile, err := GetProfileByUserID(internalID)
 	if err != nil {
 		log.Printf("MeHandler: GetProfileByUserID error for user %s: %v", internalID, err)
@@ -276,11 +299,9 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map Internal IDs to External Display IDs
 	identity.UserID = ToExternalID(identity.UserID)
 	profile.UserID = ToExternalID(profile.UserID)
 
-	// 4. Return combined document
 	doc := models.UserDocument{
 		Identity: *identity,
 		Profile:  *profile,
@@ -306,7 +327,6 @@ func UpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Normalize ID
 	req.UserID = ToInternalID(req.UserID)
 
 	if err := UpdateProfile(req); err != nil {
@@ -430,11 +450,8 @@ func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 
 	viewerID := r.URL.Query().Get("viewer_id")
 
-	// Default limit=20, offset=0
 	limit := 20
 	offset := 0
-
-	// Parse limit/offset if necessary (simple implementation assumes defaults for now or could parse query params)
 
 	internalTarget := ToInternalID(userID)
 	internalViewer := ""
@@ -449,7 +466,6 @@ func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map author IDs in posts to External IDs
 	for i := range posts {
 		posts[i].Author = ToExternalID(posts[i].Author)
 	}
@@ -460,11 +476,66 @@ func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	// Optionally check if the DB is reachable
+
 	if err := db.Ping(); err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("healthy"))
+}
+
+func GetRecentPostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	viewerID := r.URL.Query().Get("viewer_id")
+	limit := 20
+
+	internalViewer := ""
+	if viewerID != "" {
+		internalViewer = ToInternalID(viewerID)
+	}
+
+	posts, err := GetRecentPosts(internalViewer, limit)
+	if err != nil {
+		log.Println("Failed to fetch recent posts:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch posts")
+		return
+	}
+
+	for i := range posts {
+		posts[i].Author = ToExternalID(posts[i].Author)
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"posts": posts,
+	})
+}
+
+func GetSuggestedUsersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	limit := 20
+
+	users, err := GetSuggestedUsers(limit)
+	if err != nil {
+		log.Println("Failed to fetch suggested users:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch users")
+		return
+	}
+
+	for i := range users {
+		users[i].Identity.UserID = ToExternalID(users[i].Identity.UserID)
+		users[i].Profile.UserID = ToExternalID(users[i].Profile.UserID)
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"users": users,
+	})
 }

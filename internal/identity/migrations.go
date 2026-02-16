@@ -4,10 +4,10 @@ import (
 	"log"
 )
 
-// ApplyMigrations applies schema changes to the current database
+
 func ApplyMigrations() {
 	schemas := []string{
-		// Likes Table
+		
 		`CREATE TABLE IF NOT EXISTS likes (
 			user_id TEXT NOT NULL,
 			post_id UUID NOT NULL,
@@ -17,7 +17,7 @@ func ApplyMigrations() {
 			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 		);`,
 
-		// Replies Table (Threaded)
+		
 		`CREATE TABLE IF NOT EXISTS replies (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			post_id UUID NOT NULL,
@@ -30,7 +30,7 @@ func ApplyMigrations() {
 			FOREIGN KEY (parent_id) REFERENCES replies(id) ON DELETE CASCADE
 		);`,
 
-		// Reposts Table
+		
 		`CREATE TABLE IF NOT EXISTS reposts (
 			user_id TEXT NOT NULL,
 			post_id UUID NOT NULL,
@@ -40,11 +40,11 @@ func ApplyMigrations() {
 			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 		);`,
 
-		// Indexes for performance
+		
 		`CREATE INDEX IF NOT EXISTS idx_reposts_post_id ON reposts(post_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_reposts_user_id ON reposts(user_id);`,
 
-		// models.Identity Schema Updates
+		
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS public_key TEXT;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS private_key TEXT;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS key_version INT DEFAULT 1;`,
@@ -54,10 +54,10 @@ func ApplyMigrations() {
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS did TEXT;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS password_hash TEXT;`,
 
-		// models.Profile Schema Updates
+		
 		`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS version INT DEFAULT 1;`,
 
-		// Key Revocations Table
+		
 		`CREATE TABLE IF NOT EXISTS key_revocations (
 			key_id TEXT PRIMARY KEY,
 			identity_id UUID NOT NULL,
@@ -67,7 +67,7 @@ func ApplyMigrations() {
 			FOREIGN KEY (identity_id) REFERENCES identities(id) ON DELETE CASCADE
 		);`,
 
-		// Block Events Table (for User Story 1.9)
+		
 		`CREATE TABLE IF NOT EXISTS block_events (
 			blocker_id TEXT NOT NULL,
 			blocked_id TEXT NOT NULL,
@@ -78,7 +78,7 @@ func ApplyMigrations() {
 			FOREIGN KEY (blocker_id) REFERENCES identities(user_id) ON DELETE CASCADE
 		);`,
 
-		// Outbox Activities Table (for Federation)
+		
 		`CREATE TABLE IF NOT EXISTS outbox_activities (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			activity_type TEXT NOT NULL,
@@ -91,7 +91,7 @@ func ApplyMigrations() {
 			created_at TIMESTAMP DEFAULT NOW()
 		);`,
 
-		// Notifications Table
+		
 		`CREATE TABLE IF NOT EXISTS notifications (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			recipient_id TEXT NOT NULL,

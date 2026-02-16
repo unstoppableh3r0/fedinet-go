@@ -12,7 +12,7 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
-// TestHealthEndpoint tests User Story 2.14: Instance Health API
+
 func TestHealthEndpoint(t *testing.T) {
 	req, err := http.NewRequest("GET", "/federation/health", nil)
 	if err != nil {
@@ -37,7 +37,7 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
-// TestCapabilitiesEndpoint tests User Story 2.11: Capability Negotiation
+
 func TestCapabilitiesEndpoint(t *testing.T) {
 	req, err := http.NewRequest("GET", "/federation/capabilities", nil)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestCapabilitiesEndpoint(t *testing.T) {
 	}
 }
 
-// TestInboxValidation tests User Story 2.4: Inbox validation
+
 func TestInboxValidation(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -149,7 +149,7 @@ func TestInboxValidation(t *testing.T) {
 	}
 }
 
-// TestFederationModes tests User Story 2.13: Soft/Hard modes
+
 func TestFederationModes(t *testing.T) {
 	modes := []string{"soft", "hard"}
 
@@ -186,9 +186,9 @@ func TestFederationModes(t *testing.T) {
 	}
 }
 
-// TestRateLimitStructure tests User Story 2.8: Rate limiting structure
+
 func TestRateLimitStructure(t *testing.T) {
-	// Test that rate limit configuration is valid
+	
 	config := map[string]interface{}{
 		"server_url":       "https://test.com",
 		"endpoint":         "/federation/inbox",
@@ -212,11 +212,11 @@ func TestRateLimitStructure(t *testing.T) {
 	}
 }
 
-// TestBlockServerFlow tests User Story 2.12: Blocked server lists
+
 func TestBlockServerFlow(t *testing.T) {
 	serverURL := "https://spam-test-" + uuid.New().String() + ".com"
 
-	// Block server
+	
 	t.Run("Block server", func(t *testing.T) {
 		payload := map[string]interface{}{
 			"server_url": serverURL,
@@ -239,7 +239,7 @@ func TestBlockServerFlow(t *testing.T) {
 		}
 	})
 
-	// Verify block enforcement
+	
 	t.Run("Block enforcement", func(t *testing.T) {
 		payload := models.InboxRequest{
 			ActivityType: "Follow",
@@ -265,7 +265,7 @@ func TestBlockServerFlow(t *testing.T) {
 	})
 }
 
-// TestRetryBackoff tests User Story 2.3: Retry backoff calculation
+
 func TestRetryBackoff(t *testing.T) {
 	expectedBackoffs := []int{30, 60, 300, 900, 3600, 21600}
 
@@ -279,7 +279,7 @@ func TestRetryBackoff(t *testing.T) {
 	}
 }
 
-// Helper function for backoff calculation
+
 func calculateBackoff(attempt int) int {
 	backoffs := []int{30, 60, 300, 900, 3600, 21600}
 	if attempt <= len(backoffs) {
@@ -288,7 +288,7 @@ func calculateBackoff(attempt int) int {
 	return 21600
 }
 
-// Mock handlers for testing (these simulate the actual handlers)
+
 
 func mockHealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -382,7 +382,7 @@ func mockInboxWithBlockCheck(w http.ResponseWriter, r *http.Request) {
 	var req models.InboxRequest
 	json.NewDecoder(r.Body).Decode(&req)
 
-	// Simulate block check - if server contains "spam"
+	
 	if req.ActorServer != "" {
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(models.FederationResponse{

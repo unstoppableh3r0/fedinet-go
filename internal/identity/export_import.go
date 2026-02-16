@@ -11,7 +11,7 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
 
-// ExportProfileHandler generates a JSON bundle of the user's data
+
 func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
@@ -21,9 +21,9 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 
 	internalID := ToInternalID(userID)
 
-	// 1. Fetch models.Identity (with PrivateKey)
+	
 	var identity models.Identity
-	var encryptedPrivKey string // Store encrypted first
+	var encryptedPrivKey string 
 	err := db.QueryRow(`
         SELECT id, user_id, home_server, public_key, private_key, allow_discovery, created_at, updated_at, key_version, recovery_key_hash
         FROM identities WHERE user_id=$1
@@ -37,7 +37,7 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decrypt Private Key
+	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
 		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -49,9 +49,9 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	identity.UserID = ToExternalID(identity.UserID) // Export external format
+	identity.UserID = ToExternalID(identity.UserID) 
 
-	// 2. Fetch models.Profile
+	
 	profile, err := GetProfileByUserID(internalID)
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch profile")
@@ -59,15 +59,15 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	profile.UserID = ToExternalID(profile.UserID)
 
-	// 3. Fetch Posts
-	posts, err := GetUserPosts(internalID, "", 1000, 0) // Limit 1000 for MVP
+	
+	posts, err := GetUserPosts(internalID, "", 1000, 0) 
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch posts")
 		return
 	}
 
-	// 4. Fetch Graph (Followers/Following)
-	// Simplified: Just returning lists of IDs
+	
+	
 	followers := []string{}
 	rows, err := db.Query("SELECT follower_user_id FROM follows WHERE followee_user_id=$1", internalID)
 	if err == nil {
@@ -92,21 +92,21 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. Construct Bundle
+	
 	export := models.PortableProfile{
 		User: models.UserDocument{
 			Identity: identity,
 			Profile:  *profile,
 		},
-		PrivateKey: privKey, // EXTREME CAUTION: In real app, MUST be encrypted
+		PrivateKey: privKey, 
 		Posts:      posts,
 		Followers:  followers,
 		Following:  following,
 		ExportedAt: time.Now(),
 	}
 
-	// 6. Sign Bundle Integrity
-	// Sign the export timestamp + userID with private key to prove origin
+	
+	
 	sigPayload := identity.UserID + export.ExportedAt.String()
 	signature, _ := crypto.SignData([]byte(sigPayload), privKey)
 	export.IdentitySig = signature
@@ -115,7 +115,7 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, export)
 }
 
-// ImportProfileHandler ingests a JSON bundle
+
 func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -128,8 +128,8 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Verify Integrity
-	// Verify signature using the public key in the import
+	
+	
 	pubKey := importData.User.Identity.PublicKey
 	sigPayload := importData.User.Identity.UserID + importData.ExportedAt.String()
 	valid, err := crypto.VerifySignature([]byte(sigPayload), importData.IdentitySig, pubKey)
@@ -138,26 +138,26 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1.5 Validate models.Identity Document Structure
+	
 	if !ValidateIdentityDocument(&importData.User.Identity) {
 		RespondWithError(w, http.StatusBadRequest, "invalid identity document")
 		return
 	}
 
-	// 2. Import models.Identity
-	// We treat this as a "Migration" or "Restore"
-	// For migration, we might want to update the HomeServer in the models.Identity to THIS server?
-	// User Story 1.14 says "Allow importing models.Identity to new server using Recovery Key"
-	// Here we have the PRIVATE KEY. This is the "God Mode" import.
+	
+	
+	
+	
+	
 
-	// Check if user exists locally
-	// models.Identity is a struct value, checking UserID presence
+	
+	
 	if importData.User.Identity.UserID == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing identity in export")
 		return
 	}
 	internalID := ToInternalID(importData.User.Identity.UserID)
-	newHomeServer := "http://localhost:8080" // Current server
+	newHomeServer := "http://localhost:8080" 
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -166,7 +166,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Encrypt Private Key
+	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
 		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -178,8 +178,8 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert models.Identity
-	// We update HomeServer to US
+	
+	
 	_, err = tx.Exec(`
         INSERT INTO identities (
             id, user_id, home_server, public_key, private_key, 
@@ -207,7 +207,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert models.Profile
+	
 	p := importData.User.Profile
 	_, err = tx.Exec(`
         INSERT INTO profiles (
@@ -229,7 +229,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Import Posts (Optional/Best Effort)
+	
 	for _, post := range importData.Posts {
 		_, err = tx.Exec(`
             INSERT INTO posts (id, author, content, created_at, updated_at)
@@ -246,10 +246,10 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast "Move" activity?
-	// If homeserver changed, we should notify previous followers.
-	// This requires the "Migration" logic from User Story 1.14 (implied)
-	// For now, we just restore state.
+	
+	
+	
+	
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "profile imported successfully"})
 }

@@ -9,20 +9,20 @@ import (
 )
 
 func main() {
-	// Load environment variables from .env file
+	
 	if err := godotenv.Load("../../.env"); err != nil {
 		log.Println("Warning: .env file not found, using default configuration")
 	}
 
-	// Initialize database
+	
 	InitDB()
 	ApplyMigrations()
 
-	// Start background tasks
+	
 	go cleanupTask()
 	go metricsCleanupTask()
 
-	// ============ User Story 4.9: Customizable Ranking ============
+	
 	http.HandleFunc("/timeline/ranking/preference", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			GetRankingPreferenceHandler(w, r)
@@ -35,12 +35,12 @@ func main() {
 
 	http.HandleFunc("/timeline", GetTimelineHandler)
 
-	// ============ User Story 4.13: Post Versioning ============
+	
 	http.HandleFunc("/timeline/post/edit", EditPostHandler)
 	http.HandleFunc("/timeline/post/versions", GetPostVersionHistoryHandler)
 	http.HandleFunc("/timeline/post/version", GetSpecificVersionHandler)
 
-	// ============ User Story 4.14: Offline Mode ============
+	
 	http.HandleFunc("/timeline/cache", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			CacheTimelineHandler(w, r)
@@ -53,7 +53,7 @@ func main() {
 
 	http.HandleFunc("/timeline/cache/refresh", RefreshCacheHandler)
 
-	// ============ User Story 4.15: Adaptive Feed Refresh ============
+	
 	http.HandleFunc("/timeline/refresh/interval", GetRefreshIntervalHandler)
 	http.HandleFunc("/timeline/activity/update", UpdateActivityHandler)
 	http.HandleFunc("/timeline/server/load", func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +82,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8081", enableCORS(http.DefaultServeMux)))
 }
 
-// enableCORS adds CORS headers to responses
+
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -98,7 +98,7 @@ func enableCORS(next http.Handler) http.Handler {
 	})
 }
 
-// cleanupTask periodically cleans expired caches
+
 func cleanupTask() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -111,7 +111,7 @@ func cleanupTask() {
 	}
 }
 
-// metricsCleanupTask periodically cleans old metrics
+
 func metricsCleanupTask() {
 	ticker := time.NewTicker(6 * time.Hour)
 	defer ticker.Stop()

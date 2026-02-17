@@ -29,16 +29,17 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Normalize username to internal ID format
+	// Normalize username
 	req.Username = strings.ToLower(req.Username)
 	federatedUserID := req.Username
 	if !strings.Contains(req.Username, "@") {
 		federatedUserID = req.Username + "@" + InternalServerName
 	}
 
-	// Fetch user from database
+	// Fetch user
 	var passwordHash string
 	var homeServer string
+
 	err := db.QueryRow(`
 		SELECT password_hash, home_server 
 		FROM identities 
@@ -61,8 +62,17 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return user_id and home_server for frontend to store
+	// ✅ Generate JWT (valid for 24 hours)
+	token, err := GenerateUserJWT(federatedUserID, homeServer)
+	if err != nil {
+		log.Println("JWT generation error:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	// ✅ Return token + user info
 	RespondWithJSON(w, http.StatusOK, map[string]string{
+		"token":       token,
 		"user_id":     ToExternalID(federatedUserID),
 		"home_server": homeServer,
 	})

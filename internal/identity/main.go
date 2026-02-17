@@ -4,21 +4,26 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Println("Warning: .env file not found, using system environment variables")
+	}
+
 	InitDB()
 	ApplyMigrations()
 
-	// Global initialization state
 	var isInitialized bool
-	var err error
 	isInitialized, err = CheckInitializationStatus()
 	if err != nil {
 		log.Printf("⚠️  Error checking initialization status: %v", err)
 	}
 
-	// Middleware to check initialization
 	requireInit := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if !isInitialized {
@@ -29,65 +34,11 @@ func main() {
 		}
 	}
 
-	// Initialization Handler Wrapper
-	http.HandleFunc("/initialize", func(w http.ResponseWriter, r *http.Request) {
-		InitializeHandler(w, r)
-		// Update state on success check
-		if init, _ := CheckInitializationStatus(); init {
-			isInitialized = true
-			log.Println("✅ Server initialized successfully (Hot Reload)")
-		}
-	})
+	// Middleware: User Auth
+	userAuth := func(h http.HandlerFunc) http.Handler {
+		return UserAuthMiddleware(http.HandlerFunc(requireInit(h)))
+	}
 
-	// Public Status Routes (Always available)
-	http.HandleFunc("/status", StatusHandler)
-	http.HandleFunc("/health", HealthCheckHandler)
-	http.HandleFunc("/server/info", GetServerInfoHandler)
-
-	// User Routes (Protected by Init Check)
-	http.HandleFunc("/follow", requireInit(FollowHandler))
-	http.HandleFunc("/message", requireInit(MessageHandler))
-	http.HandleFunc("/user/search", requireInit(UserSearchHandler))
-	http.HandleFunc("/register", requireInit(RegisterHandler))
-	http.HandleFunc("/login", requireInit(LoginHandler))
-	http.HandleFunc("/user/me", requireInit(MeHandler))
-	http.HandleFunc("/profile/update", requireInit(UpdateProfileHandler))
-	http.HandleFunc("/post/create", requireInit(CreatePostHandler))
-	http.HandleFunc("/posts/user", requireInit(GetUserPostsHandler))
-
-	// Revocation
-	http.HandleFunc("/identity/revoke", requireInit(RevokeKeyHandler))
-	http.HandleFunc("/identity/revocations", requireInit(GetRevocationsHandler))
-
-	// Recovery & Blocking
-	http.HandleFunc("/identity/recover", requireInit(RecoverAccountHandler))
-	http.HandleFunc("/identity/block", requireInit(BlockUserHandler))
-	http.HandleFunc("/identity/unblock", requireInit(UnblockUserHandler))
-	http.HandleFunc("/identity/blocks", requireInit(GetBlocksHandler))
-
-	// Social Routes
-	http.HandleFunc("/post/like", requireInit(ToggleLikeHandler))
-	http.HandleFunc("/post/repost", requireInit(ToggleRepostHandler))
-	http.HandleFunc("/post/reply", requireInit(CreateReplyHandler))
-	http.HandleFunc("/post/replies", requireInit(GetPostRepliesHandler))
-
-	// Feed and Social Discovery
-	http.HandleFunc("/feed", requireInit(GetFeedHandler))
-	http.HandleFunc("/followers", requireInit(GetFollowersHandler))
-	http.HandleFunc("/following", requireInit(GetFollowingHandler))
-	http.HandleFunc("/follower/remove", requireInit(RemoveFollowerHandler))
-	http.HandleFunc("/unfollow", requireInit(UnfollowHandler))
-	http.HandleFunc("/messages", requireInit(GetConversationsHandler))
-	http.HandleFunc("/messages/conversation", requireInit(GetConversationMessagesHandler))
-
-	// User notification routes
-	http.HandleFunc("/notifications", requireInit(GetNotificationsHandler))
-	http.HandleFunc("/notifications/read", requireInit(MarkNotificationsReadHandler))
-
-	// Admin routes (unprotected - but login needs init)
-	http.HandleFunc("/admin/login", requireInit(AdminLoginHandler))
-
-	// Admin routes (protected) - These have their own Auth Middleware, but we also check Init
 	adminMiddleware := func(h http.Handler) http.Handler {
 		return AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !isInitialized {
@@ -98,6 +49,55 @@ func main() {
 		}))
 	}
 
+	http.HandleFunc("/initialize", func(w http.ResponseWriter, r *http.Request) {
+		InitializeHandler(w, r)
+
+		if init, _ := CheckInitializationStatus(); init {
+			isInitialized = true
+			log.Println("✅ Server initialized successfully")
+		}
+	})
+
+	http.HandleFunc("/status", StatusHandler)
+	http.HandleFunc("/health", HealthCheckHandler)
+	http.HandleFunc("/server/info", GetServerInfoHandler)
+	http.HandleFunc("/register", requireInit(RegisterHandler))
+	http.HandleFunc("/login", requireInit(LoginHandler))
+
+	http.Handle("/user/me", userAuth(MeHandler))
+	http.Handle("/profile/update", userAuth(UpdateProfileHandler))
+
+	http.Handle("/follow", userAuth(FollowHandler))
+	http.Handle("/unfollow", userAuth(UnfollowHandler))
+	http.Handle("/follower/remove", userAuth(RemoveFollowerHandler))
+	http.Handle("/followers", userAuth(GetFollowersHandler))
+	http.Handle("/following", userAuth(GetFollowingHandler))
+
+	http.Handle("/message", userAuth(MessageHandler))
+	http.Handle("/messages", userAuth(GetConversationsHandler))
+	http.Handle("/messages/conversation", userAuth(GetConversationMessagesHandler))
+
+	http.Handle("/post/create", userAuth(CreatePostHandler))
+	http.Handle("/posts/user", userAuth(GetUserPostsHandler))
+	http.Handle("/post/like", userAuth(ToggleLikeHandler))
+	http.Handle("/post/repost", userAuth(ToggleRepostHandler))
+	http.Handle("/post/reply", userAuth(CreateReplyHandler))
+	http.Handle("/post/replies", userAuth(GetPostRepliesHandler))
+	http.Handle("/feed", userAuth(GetFeedHandler))
+
+	http.Handle("/notifications", userAuth(GetNotificationsHandler))
+	http.Handle("/notifications/read", userAuth(MarkNotificationsReadHandler))
+
+	// Identity actions
+	http.Handle("/identity/revoke", userAuth(RevokeKeyHandler))
+	http.Handle("/identity/revocations", userAuth(GetRevocationsHandler))
+	http.Handle("/identity/recover", userAuth(RecoverAccountHandler))
+	http.Handle("/identity/block", userAuth(BlockUserHandler))
+	http.Handle("/identity/unblock", userAuth(UnblockUserHandler))
+	http.Handle("/identity/blocks", userAuth(GetBlocksHandler))
+
+	http.HandleFunc("/admin/login", requireInit(AdminLoginHandler))
+
 	http.Handle("/admin/config/server", adminMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			GetServerConfigHandler(w, r)
@@ -105,21 +105,18 @@ func main() {
 			UpdateServerConfigHandler(w, r)
 		}
 	})))
-	http.Handle("/admin/config/test-db", adminMiddleware(http.HandlerFunc(TestDatabaseHandler)))
 
-	// Invite Management
+	http.Handle("/admin/config/test-db", adminMiddleware(http.HandlerFunc(TestDatabaseHandler)))
+	http.Handle("/admin/stats", adminMiddleware(http.HandlerFunc(GetStatsHandler)))
+	http.Handle("/admin/users/list", adminMiddleware(http.HandlerFunc(GetAllUsersHandler)))
+
 	http.Handle("/admin/invites/generate", adminMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
 		var req GenerateInviteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			RespondWithError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		admin := "admin"
-		invite, err := GenerateInvite(req, admin)
+		invite, err := GenerateInvite(req, "admin")
 		if err != nil {
 			RespondWithError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -128,10 +125,6 @@ func main() {
 	})))
 
 	http.Handle("/admin/invites/list", adminMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
 		invites, err := ListInvites()
 		if err != nil {
 			RespondWithError(w, http.StatusInternalServerError, err.Error())
@@ -141,10 +134,6 @@ func main() {
 	})))
 
 	http.Handle("/admin/invites/revoke", adminMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
 		var req struct {
 			InviteCode string `json:"invite_code"`
 		}
@@ -159,55 +148,35 @@ func main() {
 		RespondWithJSON(w, http.StatusOK, map[string]string{"message": "invite revoked"})
 	})))
 
-	http.Handle("/admin/invites/qr", adminMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		code := r.URL.Query().Get("code")
-		if code == "" {
-			RespondWithError(w, http.StatusBadRequest, "code required")
-			return
-		}
-		png, err := GenerateInviteQR(code)
-		if err != nil {
-			RespondWithError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		w.Header().Set("Content-Type", "image/png")
-		w.Write(png)
-	})))
-
-	// Admin Stats & Users List (Missing in previous context but requested by user)
-	http.Handle("/admin/stats", adminMiddleware(http.HandlerFunc(GetStatsHandler)))
-	http.Handle("/admin/users/list", adminMiddleware(http.HandlerFunc(GetAllUsersHandler)))
-
+	// -------------------------
+	// Public Invite Validation
+	// -------------------------
 	http.HandleFunc("/invite/validate", func(w http.ResponseWriter, r *http.Request) {
-		// Public endpoint, but needs server info.
-		// If not initialized, ValidateInvite will likely fail or server info query will fail.
-		// We can allow it but it might return errors if DB empty.
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			RespondWithError(w, http.StatusBadRequest, "code required")
 			return
 		}
+
 		invite, err := ValidateInvite(code)
 		if err != nil {
 			RespondWithError(w, http.StatusForbidden, err.Error())
 			return
 		}
 
-		var serverID, serverName, publicKey string
-		db.QueryRow("SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1").Scan(&serverID, &serverName, &publicKey)
-
 		RespondWithJSON(w, http.StatusOK, map[string]interface{}{
 			"valid":       true,
 			"invite_type": invite.InviteType,
-			"server_id":   serverID,
-			"server_name": serverName,
-			"public_key":  publicKey,
 		})
 	})
 
-	log.Println("Go server running on :8082")
+	// -------------------------
+	// Start Server
+	// -------------------------
+	log.Println("🚀 Identity service running on :8082")
+
 	if !isInitialized {
-		log.Println("⚠️  Server NOT initialized. Visit /initialize (or admin setup) to configure.")
+		log.Println("⚠️  Server NOT initialized.")
 	} else {
 		log.Println("✅ Server initialized and ready")
 	}
@@ -215,14 +184,15 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8082", enableCORS(http.DefaultServeMux)))
 }
 
+// -------------------------
+// CORS Middleware
+// -------------------------
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow all origins for dev
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		// Handle preflight requests
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return

@@ -11,7 +11,6 @@ import (
 var db *sql.DB
 
 func InitDB() {
-
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		log.Fatal("DATABASE_URL not set")
@@ -20,12 +19,12 @@ func InitDB() {
 	var err error
 	db, err = sql.Open("postgres", dsn)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to open DB: %v", err)
 	}
 
 	if err = db.Ping(); err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 
-	log.Println("Database connected")
+	log.Println("Moderation DB connected")
 }

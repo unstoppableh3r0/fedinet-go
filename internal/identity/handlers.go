@@ -9,6 +9,11 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
+func GetUserFromContext(r *http.Request) (string, bool) {
+	userID, ok := r.Context().Value(userContextKey).(string)
+	return userID, ok
+}
+
 func FollowHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("---- /follow HIT ----")
 	if r.Method != http.MethodPost {
@@ -16,8 +21,13 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req struct {
-		Follower string `json:"follower"`
 		Followee string `json:"followee"`
 	}
 
@@ -26,13 +36,13 @@ func FollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Follower == "" || req.Followee == "" {
+	if req.Followee == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
 
 	// Normalize IDs to internal storage format
-	internalFollower := ToInternalID(req.Follower)
+	internalFollower := ToInternalID(userID)
 	internalFollowee := ToInternalID(req.Followee)
 
 	if err := FollowUser(internalFollower, internalFollowee); err != nil {
@@ -49,8 +59,13 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req struct {
-		From    string `json:"from"`
 		To      string `json:"to"`
 		Content string `json:"content"`
 	}
@@ -60,12 +75,12 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.From == "" || req.To == "" || req.Content == "" {
+	if req.To == "" || req.Content == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
 
-	if err := SendMessage(ToInternalID(req.From), ToInternalID(req.To), req.Content); err != nil {
+	if err := SendMessage(ToInternalID(userID), ToInternalID(req.To), req.Content); err != nil {
 		RespondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -243,10 +258,10 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func MeHandler(w http.ResponseWriter, r *http.Request) {
-	// 1. Get UserID from query param
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		RespondWithError(w, http.StatusUnauthorized, "unauthorized: missing user_id param")
+	// 1. Get UserID from context (Auth)
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -295,19 +310,20 @@ func UpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req models.UpdateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
-	if req.UserID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id required")
-		return
-	}
-
-	// Normalize ID
-	req.UserID = ToInternalID(req.UserID)
+	// Override/Set UserID from Auth
+	req.UserID = ToInternalID(userID)
 
 	if err := UpdateProfile(req); err != nil {
 		log.Println("models.Profile update failed:", err)
@@ -326,8 +342,13 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req struct {
-		UserID  string `json:"user_id"`
 		Content string `json:"content"`
 	}
 
@@ -336,12 +357,12 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == "" || req.Content == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id and content required")
+	if req.Content == "" {
+		RespondWithError(w, http.StatusBadRequest, "content required")
 		return
 	}
 
-	internalID := ToInternalID(req.UserID)
+	internalID := ToInternalID(userID)
 
 	postID, err := CreatePost(internalID, req.Content)
 	if err != nil {
@@ -362,8 +383,13 @@ func ToggleLikeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req struct {
-		UserID string `json:"user_id"`
 		PostID string `json:"post_id"`
 	}
 
@@ -372,12 +398,12 @@ func ToggleLikeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == "" || req.PostID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id and post_id required")
+	if req.PostID == "" {
+		RespondWithError(w, http.StatusBadRequest, "post_id required")
 		return
 	}
 
-	if err := ToggleLike(ToInternalID(req.UserID), req.PostID); err != nil {
+	if err := ToggleLike(ToInternalID(userID), req.PostID); err != nil {
 		log.Println("Like failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "action failed")
 		return
@@ -392,8 +418,13 @@ func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req struct {
-		UserID string `json:"user_id"`
 		PostID string `json:"post_id"`
 	}
 
@@ -402,12 +433,12 @@ func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == "" || req.PostID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id and post_id required")
+	if req.PostID == "" {
+		RespondWithError(w, http.StatusBadRequest, "post_id required")
 		return
 	}
 
-	if err := ToggleRepost(ToInternalID(req.UserID), req.PostID); err != nil {
+	if err := ToggleRepost(ToInternalID(userID), req.PostID); err != nil {
 		log.Println("Repost failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "action failed")
 		return
@@ -422,13 +453,19 @@ func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
+	// Target User Posts
+	targetID := r.URL.Query().Get("user_id")
+	if targetID == "" {
 		RespondWithError(w, http.StatusBadRequest, "user_id required")
 		return
 	}
 
-	viewerID := r.URL.Query().Get("viewer_id")
+	// Viewer Context (Authenticated)
+	viewerID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	// Default limit=20, offset=0
 	limit := 20
@@ -436,11 +473,8 @@ func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Parse limit/offset if necessary (simple implementation assumes defaults for now or could parse query params)
 
-	internalTarget := ToInternalID(userID)
-	internalViewer := ""
-	if viewerID != "" {
-		internalViewer = ToInternalID(viewerID)
-	}
+	internalTarget := ToInternalID(targetID)
+	internalViewer := ToInternalID(viewerID)
 
 	posts, err := GetUserPosts(internalTarget, internalViewer, limit, offset)
 	if err != nil {

@@ -14,9 +14,9 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id required")
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -69,9 +69,9 @@ func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id required")
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -104,7 +104,6 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID     string `json:"user_id"`     // Wrapper around identity.user_id (the one doing the removal/unfollowing)
 		FollowerID string `json:"follower_id"` // The one being removed/unfollowed
 	}
 
@@ -123,12 +122,18 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	// logic: `user_id: identity.user_id` (ME), `follower_id: userId` (THEM).
 	// Backend needs to DELETE FROM follows WHERE follower=THEM AND followee=ME.
 
-	if req.UserID == "" || req.FollowerID == "" {
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if req.FollowerID == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
 
-	me := ToInternalID(req.UserID)
+	me := ToInternalID(userID)
 	them := ToInternalID(req.FollowerID)
 
 	// Remove THEM from following ME
@@ -150,7 +155,6 @@ func UnfollowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Follower string `json:"follower"`
 		Followee string `json:"followee"`
 	}
 
@@ -159,13 +163,19 @@ func UnfollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Follower == "" || req.Followee == "" {
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if req.Followee == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
 
 	// Unfollow: Follower (ME) stops following Followee (THEM)
-	internalFollower := ToInternalID(req.Follower)
+	internalFollower := ToInternalID(userID)
 	internalFollowee := ToInternalID(req.Followee)
 
 	if err := UnfollowUser(internalFollower, internalFollowee); err != nil {
@@ -184,7 +194,6 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID   string  `json:"user_id"`
 		PostID   string  `json:"post_id"`
 		Content  string  `json:"content"`
 		ParentID *string `json:"parent_id"` // Optional
@@ -195,12 +204,18 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == "" || req.PostID == "" || req.Content == "" {
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if req.PostID == "" || req.Content == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
 
-	replyID, err := CreateReply(ToInternalID(req.UserID), req.PostID, req.Content, req.ParentID)
+	replyID, err := CreateReply(ToInternalID(userID), req.PostID, req.Content, req.ParentID)
 	if err != nil {
 		log.Println("Reply failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "reply failed")
@@ -244,9 +259,9 @@ func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id required")
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -278,9 +293,9 @@ func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id required")
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -312,11 +327,16 @@ func GetConversationMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.URL.Query().Get("user_id")
+	userID, ok := GetUserFromContext(r)
+	if !ok {
+		RespondWithError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	otherUserID := r.URL.Query().Get("other_user_id")
 
-	if userID == "" || otherUserID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id and other_user_id required")
+	if otherUserID == "" {
+		RespondWithError(w, http.StatusBadRequest, "other_user_id required")
 		return
 	}
 

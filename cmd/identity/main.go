@@ -60,6 +60,7 @@ func main() {
 	mux.HandleFunc("/initialize", identity.InitializeHandler)
 	mux.HandleFunc("/status", identity.StatusHandler)
 	mux.HandleFunc("/server-info", identity.GetServerInfoHandler)
+	mux.HandleFunc("/server/info", identity.GetServerInfoHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

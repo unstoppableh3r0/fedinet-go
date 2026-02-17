@@ -1,4 +1,4 @@
-package main
+package identity
 
 import (
 	"encoding/json"
@@ -8,7 +8,6 @@ import (
 
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
-
 
 func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

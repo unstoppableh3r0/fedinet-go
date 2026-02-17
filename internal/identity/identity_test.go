@@ -1,4 +1,4 @@
-package test
+package identity
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-
+// Mock structures matching the identity models
 type Identity struct {
 	ID             uuid.UUID `json:"id"`
 	UserID         string    `json:"user_id"`
@@ -57,7 +57,7 @@ type UpdateProfileRequest struct {
 	FollowingVisibility *string `json:"following_visibility"`
 }
 
-
+// TestUserSearchEndpoint tests User Story 1.3: User Search
 func TestUserSearchEndpoint(t *testing.T) {
 	req, err := http.NewRequest("GET", "/identity/user/search?user_id=alice", nil)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestUserSearchEndpoint(t *testing.T) {
 	}
 }
 
-
+// TestRegisterEndpoint tests User Story 1.1: Registration
 func TestRegisterEndpoint(t *testing.T) {
 	payload := map[string]string{
 		"username": "bob",
@@ -117,7 +117,7 @@ func TestRegisterEndpoint(t *testing.T) {
 	}
 }
 
-
+// TestFollowEndpoint tests User Story 1.4: Following
 func TestFollowEndpoint(t *testing.T) {
 	payload := map[string]string{
 		"follower": "alice@fedinet.local",
@@ -149,7 +149,7 @@ func TestFollowEndpoint(t *testing.T) {
 	}
 }
 
-
+// Mock handlers simulating the identity service behavior
 
 func mockUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
@@ -158,7 +158,7 @@ func mockUserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
+	// Respond with a mock UserDocument
 	doc := UserDocument{
 		Identity: Identity{
 			ID:             uuid.New(),

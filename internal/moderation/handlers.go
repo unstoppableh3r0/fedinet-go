@@ -1,4 +1,4 @@
-package main
+package moderation
 
 import (
 	"encoding/json"

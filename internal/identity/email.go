@@ -1,4 +1,4 @@
-package main
+package identity
 
 import (
 	"crypto/rand"

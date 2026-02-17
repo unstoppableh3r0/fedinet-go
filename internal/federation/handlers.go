@@ -1,4 +1,4 @@
-package main
+package federation
 
 import (
 	"bytes"
@@ -200,11 +200,6 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	
-	if err := VerifyRequestSignature(req); err != nil {
-		sendError(w, http.StatusUnauthorized, "invalid_signature", "Signature verification failed", err.Error())
-		return
-	}
-
 	
 	activityID, err := ProcessInboundActivity(
 		req.ActivityType,

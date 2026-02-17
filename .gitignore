@@ -30,3 +30,13 @@ go.work.sum
 # .vscode/
 
 .DS_Store
+# Binaries
+*.exe
+server
+
+# Test reports
+backend_test_report.txt
+frontend_test_report.txt
+
+# Local frontend copy (if not part of backend repo)
+frontend/

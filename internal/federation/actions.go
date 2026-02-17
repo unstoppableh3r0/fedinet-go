@@ -1,4 +1,4 @@
-package main
+package federation
 
 import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (

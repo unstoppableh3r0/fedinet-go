@@ -4,8 +4,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
+
+// InternalServerName is the internal identifier used in user_ids (e.g., server_a, server_b)
+var InternalServerName = func() string {
+	serverID := os.Getenv("SERVER_ID")
+	if serverID != "" {
+		return serverID
+	}
+	return "localhost" // fallback for development
+}()
 
 func main() {
 	InitDB()
@@ -43,6 +53,13 @@ func main() {
 	http.HandleFunc("/status", StatusHandler)
 	http.HandleFunc("/health", HealthCheckHandler)
 	http.HandleFunc("/server/info", GetServerInfoHandler)
+
+	// Federation handshake endpoints (public, no auth required)
+	http.HandleFunc("/api/handshake", HandleHandshakeRequest)
+	http.HandleFunc("/api/handshake/ack", HandleHandshakeAcknowledgment)
+
+	// Federated messaging endpoint (public, signature-verified)
+	http.HandleFunc("/api/message/federated", HandleIncomingFederatedMessage)
 
 	http.HandleFunc("/follow", requireInit(FollowHandler))
 	http.HandleFunc("/message", requireInit(MessageHandler))
@@ -177,6 +194,7 @@ func main() {
 	http.Handle("/admin/trusted-servers/update", adminMiddleware(http.HandlerFunc(UpdateTrustedServerHandler)))
 	http.Handle("/admin/trusted-servers/remove", adminMiddleware(http.HandlerFunc(RemoveTrustedServerHandler)))
 	http.Handle("/admin/trusted-servers/key", adminMiddleware(http.HandlerFunc(GetServerPublicKeyHandler)))
+	http.Handle("/admin/trusted-servers/test", adminMiddleware(http.HandlerFunc(TestTrustedServerConnectionHandler)))
 
 	// Federated Search
 	http.HandleFunc("/api/search", requireInit(FederatedSearchHandler))

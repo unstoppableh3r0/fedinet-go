@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -66,6 +67,34 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if this is a federated message (recipient on another server)
+	isFederated, serverName := IsFederatedUser(req.To)
+
+	if isFederated {
+		// Deliver to remote server
+		log.Printf("Routing federated message from %s to %s (server: %s)", req.From, req.To, serverName)
+
+		err := DeliverFederatedMessage(ToInternalID(req.From), req.To, req.Content)
+		if err != nil {
+			log.Printf("Failed to deliver federated message: %v", err)
+			RespondWithError(w, http.StatusBadGateway, fmt.Sprintf("failed to deliver message: %v", err))
+			return
+		}
+
+		// Store a copy for sender's message history
+		if err := StoreSentFederatedMessage(ToInternalID(req.From), req.To, req.Content); err != nil {
+			log.Printf("Warning: failed to store sent message copy: %v", err)
+			// Don't fail the request - message was already delivered
+		}
+
+		RespondWithJSON(w, http.StatusOK, map[string]string{
+			"message": "federated message sent",
+			"server":  serverName,
+		})
+		return
+	}
+
+	// Local message - use existing logic
 	if err := SendMessage(ToInternalID(req.From), ToInternalID(req.To), req.Content); err != nil {
 		RespondWithError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -201,7 +230,8 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	federatedUserID := strings.ToLower(req.Username) + "@" + InternalServerName
+	// Convert username to internal format
+	federatedUserID := ToInternalID(strings.ToLower(req.Username))
 	if identity, err := GetIdentityByUserID(federatedUserID); err == nil && identity != nil {
 		RespondWithError(w, http.StatusConflict, "username taken")
 		return

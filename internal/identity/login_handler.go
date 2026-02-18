@@ -31,10 +31,8 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Username = strings.ToLower(req.Username)
-	federatedUserID := req.Username
-	if !strings.Contains(req.Username, "@") {
-		federatedUserID = req.Username + "@" + InternalServerName
-	}
+	// Convert username to internal format
+	federatedUserID := ToInternalID(req.Username)
 
 	var passwordHash string
 	var homeServer string
@@ -60,12 +58,16 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate Tokens
-	serverURL := os.Getenv("SERVER_URL")
-	if serverURL == "" {
-		serverURL = "http://localhost:8082"
+	// Return external-facing URL for frontend access (mapped Docker ports)
+	serverID := os.Getenv("SERVER_ID")
+	var externalURL string
+	if serverID == "server-b" {
+		externalURL = "http://localhost:9080"
+	} else {
+		externalURL = "http://localhost:8080"
 	}
 
-	accessToken, refreshToken, err := GenerateTokenPair(federatedUserID, serverURL)
+	accessToken, refreshToken, err := GenerateTokenPair(federatedUserID, externalURL)
 	if err != nil {
 		log.Println("Token generation failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to generate tokens")
@@ -74,7 +76,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"user_id":       ToExternalID(federatedUserID),
-		"home_server":   serverURL,
+		"home_server":   externalURL,
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
 	})

@@ -28,7 +28,6 @@ func FollowUser(followerID, followeeID string) error {
 		return err
 	}
 
-	
 	return CreateNotification(followeeID, followerID, "FOLLOW", "")
 }
 
@@ -56,7 +55,7 @@ func SendMessage(senderID, recipientID, content string) error {
 	var messageID string
 
 	err := db.QueryRow(
-		`INSERT INTO messages (sender_id, recipient_id, content)
+		`INSERT INTO messages (sender, receiver, content)
 		 VALUES ($1, $2, $3)
 		 RETURNING id`,
 		senderID, recipientID, content,
@@ -66,7 +65,6 @@ func SendMessage(senderID, recipientID, content string) error {
 		return err
 	}
 
-	
 	payload := fmt.Sprintf(`{"content": %q}`, content)
 
 	return LogActivity(
@@ -144,7 +142,7 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 		&p.BannerURL,
 		&p.Bio,
 		&p.PortfolioURL,
-		&birthDate, 
+		&birthDate,
 		&p.Location,
 		&p.FollowersVisibility,
 		&p.FollowingVisibility,
@@ -163,7 +161,6 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 		return nil, err
 	}
 
-	
 	if birthDate.Valid {
 		t := birthDate.Time
 		p.BirthDate = &t
@@ -172,19 +169,16 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 	return &p, nil
 }
 
-
 func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 	if !ValidateUserID(userID) {
 		return "", fmt.Errorf("invalid user_id format")
 	}
 
-	
 	pubKey, privKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		return "", err
 	}
 
-	
 	recoveryKey, recoveryHash, err := crypto.GenerateRecoveryKey()
 	if err != nil {
 		return "", err
@@ -196,7 +190,6 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 	}
 	defer tx.Rollback()
 
-	
 	var exists bool
 	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM identities WHERE user_id=$1)", userID).Scan(&exists)
 	if err != nil {
@@ -206,10 +199,9 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", fmt.Errorf("user already exists")
 	}
 
-	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
-		masterKey = "0000000000000000000000000000000000000000000000000000000000000000" 
+		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
 		fmt.Println("WARNING: Using insecure default SERVER_MASTER_KEY")
 	}
 
@@ -218,10 +210,8 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", fmt.Errorf("failed to encrypt private key: %w", err)
 	}
 
-	
 	did := "did:fedinet:" + crypto.HashString(pubKey)
 
-	
 	identityID := uuid.New()
 	_, err = tx.Exec(`
 		INSERT INTO identities (
@@ -232,7 +222,6 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", err
 	}
 
-	
 	_, err = tx.Exec(`
 		INSERT INTO profiles (
 			user_id, display_name, bio, location, 
@@ -241,7 +230,7 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 			$1, $2, 'Just joined Gotham Social', 'Unknown',
 			'public', 'public', NOW(), NOW(), 1
 		)
-	`, userID, userID) 
+	`, userID, userID)
 	if err != nil {
 		return "", err
 	}
@@ -285,26 +274,12 @@ func GetIdentityByUserID(userID string) (*models.Identity, error) {
 		return nil, nil
 	}
 	if err != nil {
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
+
 		return nil, err
 	}
 
 	return &i, nil
 }
-
 
 func UpdateProfile(req models.UpdateProfileRequest) error {
 	query := "UPDATE profiles SET updated_at = NOW(), version = version + 1"
@@ -365,12 +340,11 @@ func UpdateProfile(req models.UpdateProfileRequest) error {
 		return err
 	}
 
-	
 	return propagateProfileUpdate(req.UserID, req)
 }
 
 func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) error {
-	
+
 	rows, err := db.Query(`
         SELECT DISTINCT follower_home_server 
         FROM follows 
@@ -379,7 +353,7 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
         AND follower_home_server != ''
     `, userID)
 	if err != nil {
-		return err 
+		return err
 	}
 	defer rows.Close()
 
@@ -395,32 +369,22 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 		return nil
 	}
 
-	
-	
-	
-	
-
-	
-	
 	var currentVersion int
 	db.QueryRow("SELECT version FROM profiles WHERE user_id=$1", userID).Scan(&currentVersion)
 
-	
 	obj := map[string]interface{}{
 		"type":    "Person",
-		"id":      userID, 
+		"id":      userID,
 		"version": currentVersion,
 		"updated": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	
 	if req.DisplayName != nil {
 		obj["display_name"] = *req.DisplayName
 	}
 	if req.Bio != nil {
 		obj["bio"] = *req.Bio
 	}
-	
 
 	payload := map[string]interface{}{
 		"@context": "https://www.w3.org/ns/activitystreams",
@@ -434,8 +398,6 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 		return err
 	}
 
-	
-	
 	for _, server := range servers {
 		_, err := db.Exec(`
             INSERT INTO outbox_activities (
@@ -467,7 +429,7 @@ func CreatePost(userID, content string) (string, error) {
 }
 
 func ToggleLike(userID, postID string) error {
-	
+
 	var exists bool
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM likes WHERE user_id=$1 AND post_id=$2)", userID, postID).Scan(&exists)
 	if err != nil {
@@ -484,17 +446,14 @@ func ToggleLike(userID, postID string) error {
 		return err
 	}
 
-	
 	if !exists {
 		if err := LogActivity(userID, "LIKE", "post", postID, "", ""); err != nil {
 			return err
 		}
 
-		
-		
 		var authorID string
 		if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
-			if authorID != userID { 
+			if authorID != userID {
 				CreateNotification(authorID, userID, "LIKE", postID)
 			}
 		}
@@ -547,8 +506,6 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 
 	LogActivity(userID, "REPLY", "post", postID, "", payload)
 
-	
-	
 	var authorID string
 	if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
 		if authorID != userID {
@@ -556,11 +513,10 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 		}
 	}
 
-	
 	if parentID != nil {
 		var parentAuthorID string
 		if err := db.QueryRow("SELECT user_id FROM replies WHERE id=$1", *parentID).Scan(&parentAuthorID); err == nil {
-			if parentAuthorID != userID && parentAuthorID != authorID { 
+			if parentAuthorID != userID && parentAuthorID != authorID {
 				CreateNotification(parentAuthorID, userID, "REPLY", postID)
 			}
 		}
@@ -621,51 +577,6 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 	`
 
 	rows, err := db.Query(query, targetUserID, viewerUserID, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var posts []models.Post
-	for rows.Next() {
-		var p models.Post
-		err := rows.Scan(
-			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
-			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
-			&p.HasLiked, &p.HasReposted,
-		)
-		if err != nil {
-			return nil, err
-		}
-		posts = append(posts, p)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return posts, nil
-}
-
-func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
-	query := `
-		SELECT 
-			p.id, 
-			p.author, 
-			p.content, 
-			p.created_at, 
-			p.updated_at,
-			(SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
-			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
-			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
-			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
-			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted
-		FROM posts p
-		ORDER BY p.created_at DESC
-		LIMIT $2
-	`
-
-	rows, err := db.Query(query, viewerUserID, limit)
 	if err != nil {
 		return nil, err
 	}

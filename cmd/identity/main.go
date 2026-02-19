@@ -72,16 +72,33 @@ func main() {
 	mux.HandleFunc("/login", identity.LoginHandler)
 	mux.HandleFunc("/recover", identity.RecoverAccountHandler)
 
-	// Social
+	// Social — feed, followers, following, replies, conversations
 	mux.HandleFunc("/feed", identity.GetFeedHandler)
 	mux.HandleFunc("/followers", identity.GetFollowersHandler)
 	mux.HandleFunc("/following", identity.GetFollowingHandler)
 	mux.HandleFunc("/followers/remove", identity.RemoveFollowerHandler)
+	mux.HandleFunc("/follower/remove", identity.RemoveFollowerHandler)
 	mux.HandleFunc("/unfollow", identity.UnfollowHandler)
 	mux.HandleFunc("/reply", identity.CreateReplyHandler)
 	mux.HandleFunc("/replies", identity.GetPostRepliesHandler)
 	mux.HandleFunc("/conversations", identity.GetConversationsHandler)
 	mux.HandleFunc("/conversation/messages", identity.GetConversationMessagesHandler)
+
+	// Social actions called directly by frontend
+	mux.HandleFunc("/post/create", identity.CreatePostHandler)
+	mux.HandleFunc("/post/like", identity.LikePostHandler)
+	mux.HandleFunc("/post/repost", identity.RepostHandler)
+	mux.HandleFunc("/post/reply", identity.PostReplyHandler)
+	mux.HandleFunc("/post/replies", identity.GetPostRepliesAltHandler)
+	mux.HandleFunc("/posts/user", identity.GetUserPostsHandler)
+	mux.HandleFunc("/posts/recent", identity.GetRecentPostsHandler)
+	mux.HandleFunc("/follow", identity.FollowHandler)
+	mux.HandleFunc("/message", identity.SendMessageHandler)
+	mux.HandleFunc("/messages", identity.GetMessagesHandler)
+	mux.HandleFunc("/messages/conversation", identity.GetMessagesConversationHandler)
+	mux.HandleFunc("/user/me", identity.GetUserMeHandler)
+	mux.HandleFunc("/user/search", identity.GetUserSearchHandler)
+	mux.HandleFunc("/users/suggested", identity.GetSuggestedUsersHandler)
 
 	// Notifications
 	mux.HandleFunc("/notifications", identity.GetNotificationsHandler)
@@ -121,9 +138,19 @@ func main() {
 	mux.Handle("/admin/users", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAllUsersHandler)))
 	mux.Handle("/admin/stats", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetStatsHandler)))
 
+	// Frontend-compatible admin route aliases
+	mux.Handle("/admin/config/server", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetServerConfigHandler)))
+	mux.Handle("/admin/users/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAllUsersHandler)))
+	mux.Handle("/admin/config/test-db", identity.AdminAuthMiddleware(http.HandlerFunc(identity.TestDatabaseHandler)))
+	mux.Handle("/admin/migrate/start", identity.AdminAuthMiddleware(http.HandlerFunc(identity.StartMigrationHandler)))
+	mux.Handle("/admin/invites/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.ListInvitesHandler)))
+	mux.Handle("/admin/invites/generate", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GenerateInviteHandler)))
+	mux.Handle("/admin/invites/revoke", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RevokeInviteHandler)))
+	mux.Handle("/admin/invites/qr", identity.AdminAuthMiddleware(http.HandlerFunc(identity.InviteQRHandler)))
+
 	handler := corsMiddleware(mux)
 
-	log.Println("✅ Identity service listening on :8082")
+	log.Println("✅ Identity service listening on :yes")
 	if err := http.ListenAndServe(":8082", handler); err != nil {
 		log.Fatalf("❌ Server failed: %v", err)
 	}

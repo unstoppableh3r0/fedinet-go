@@ -1,15 +1,15 @@
 # =============================================================================
 # Fedinet Two-Server Federation Setup
 # =============================================================================
-# Server A: Identity on :8080, Federation on :8081
-# Server B: Identity on :9080, Federation on :9081
+# Server A: Identity on :8082, Federation on :8081
+# Server B: Identity on :9082, Federation on :9081
 #
 # Usage:
 #   docker-compose -f docker-compose.federation.yml up --build
 #
 # After startup:
-#   1. Initialize Server A: POST http://localhost:8080/initialize
-#   2. Initialize Server B: POST http://localhost:9080/initialize
+#   1. Initialize Server A: POST http://localhost:8082/initialize
+#   2. Initialize Server B: POST http://localhost:9082/initialize
 #   3. Run federation migrations (see README)
 # =============================================================================
 
@@ -41,13 +41,13 @@ services:
       dockerfile: internal/identity/Dockerfile
     container_name: server_a_identity
     ports:
-      - "8080:8082"
+      - "8082:8082"
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_a?sslmode=disable
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: password123
       JWT_SECRET: fedinet-dev-secret-key-server-a
-      SERVER_URL: http://localhost:8080
+      SERVER_URL: http://localhost:8082
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,13 +75,13 @@ services:
       dockerfile: internal/identity/Dockerfile
     container_name: server_b_identity
     ports:
-      - "9080:8082"
+      - "9082:8082"
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_b?sslmode=disable
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: password123
       JWT_SECRET: fedinet-dev-secret-key-server-b
-      SERVER_URL: http://localhost:9080
+      SERVER_URL: http://localhost:9082
     depends_on:
       postgres:
         condition: service_healthy

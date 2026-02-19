@@ -7,19 +7,15 @@ import (
 	"strings"
 )
 
-
-
-
 func AdminAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		
+
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			RespondWithError(w, http.StatusUnauthorized, "missing authorization header")
 			return
 		}
 
-		
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			RespondWithError(w, http.StatusUnauthorized, "invalid authorization header format")
@@ -28,7 +24,6 @@ func AdminAuthMiddleware(next http.Handler) http.Handler {
 
 		tokenString := parts[1]
 
-		
 		claims, err := ValidateJWT(tokenString)
 		if err != nil {
 			RespondWithError(w, http.StatusUnauthorized, "invalid or expired token")
@@ -40,13 +35,9 @@ func AdminAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		
 		next.ServeHTTP(w, r)
 	})
 }
-
-
-
 
 func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -60,13 +51,11 @@ func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	if !ValidateAdminCredentials(req.Username, req.Password) {
 		RespondWithError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
-	
 	token, err := GenerateJWT(req.Username)
 	if err != nil {
 		log.Println("Failed to generate JWT:", err)
@@ -74,13 +63,11 @@ func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"token":   token,
 		"message": "login successful",
 	})
 }
-
 
 func GetServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -97,7 +84,6 @@ func GetServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, config)
 }
-
 
 func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
@@ -119,12 +105,10 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	authHeader := r.Header.Get("Authorization")
 	tokenString := strings.Split(authHeader, " ")[1]
 	claims, _ := ValidateJWT(tokenString)
 
-	
 	err := UpdateServerName(req.ServerName, claims.Username)
 	if err != nil {
 		log.Println("Failed to update server name:", err)
@@ -137,7 +121,6 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 		"server_name": req.ServerName,
 	})
 }
-
 
 func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -159,7 +142,6 @@ func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	err := TestDatabaseConnection(req.ConnectionString)
 	if err != nil {
 		RespondWithJSON(w, http.StatusBadRequest, map[string]string{
@@ -174,7 +156,6 @@ func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "database connection successful",
 	})
 }
-
 
 func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -193,14 +174,12 @@ func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	err := TestDatabaseConnection(req.NewConnectionString)
 	if err != nil {
 		RespondWithError(w, http.StatusBadRequest, "cannot connect to new database: "+err.Error())
 		return
 	}
 
-	
 	migrationID, err := MigrateDatabase(req.NewConnectionString)
 	if err != nil {
 		log.Println("Failed to start migration:", err)
@@ -214,7 +193,6 @@ func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 		"message":      "database migration started",
 	})
 }
-
 
 func GetMigrationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -238,7 +216,6 @@ func GetMigrationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, status)
 }
 
-
 func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -258,7 +235,6 @@ func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -275,7 +251,84 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, stats)
 }
 
+// ListInvitesHandler handles GET /admin/invites/list
+func ListInvitesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	invites, err := ListInvites()
+	if err != nil {
+		log.Println("Failed to list invites:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to retrieve invites")
+		return
+	}
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{"invites": invites})
+}
 
+// GenerateInviteHandler handles POST /admin/invites/generate
+func GenerateInviteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req GenerateInviteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	createdBy := "admin"
+	if parts := strings.Split(r.Header.Get("Authorization"), " "); len(parts) == 2 {
+		if claims, err := ValidateJWT(parts[1]); err == nil {
+			createdBy = claims.Username
+		}
+	}
+	invite, err := GenerateInvite(req, createdBy)
+	if err != nil {
+		log.Println("Failed to generate invite:", err)
+		RespondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	RespondWithJSON(w, http.StatusOK, invite)
+}
 
+// RevokeInviteHandler handles POST /admin/invites/revoke
+func RevokeInviteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		InviteCode string `json:"invite_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := RevokeInvite(req.InviteCode); err != nil {
+		RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "invite revoked"})
+}
 
-
+// InviteQRHandler handles GET /admin/invites/qr?code=...
+func InviteQRHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		RespondWithError(w, http.StatusBadRequest, "code parameter required")
+		return
+	}
+	png, err := GenerateInviteQR(code)
+	if err != nil {
+		RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.WriteHeader(http.StatusOK)
+	w.Write(png)
+}

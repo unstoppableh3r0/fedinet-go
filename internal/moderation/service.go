@@ -15,6 +15,8 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// REPORT SUBMISSION
+
 func (s *Service) SubmitReport(
 	reporterID string,
 	targetRef string,
@@ -31,20 +33,27 @@ func (s *Service) SubmitReport(
 		CreatedAt:    time.Now(),
 	}
 
+	// Save locally
 	if err := s.repo.CreateReport(report); err != nil {
 		return err
 	}
 
+	// If report targets remote server → attempt federation
 	if targetServer != "" {
+
 		blocked, err := s.repo.IsServerBlocked(targetServer)
 		if err != nil {
 			return err
 		}
+
+		// Do not forward to blocked servers
 		if blocked {
 			return nil
 		}
 
+		// Try direct federation call
 		if err := s.forwardReport(report); err != nil {
+			// If federation fails → queue event for retry
 			return s.queueReportForward(report)
 		}
 	}
@@ -52,22 +61,46 @@ func (s *Service) SubmitReport(
 	return nil
 }
 
+// REPORT LISTING
+
 func (s *Service) ListPendingReports() ([]models.Report, error) {
 	return s.repo.ListPendingReports()
 }
+
+// REPORT RESOLUTION
 
 func (s *Service) ResolveReport(
 	reportID int64,
 	resolvedBy string,
 ) error {
 
-	_, err := s.repo.GetReportByID(reportID)
+	report, err := s.repo.GetReportByID(reportID)
 	if err != nil {
 		return err
 	}
 
-	return s.repo.ResolveReport(reportID, resolvedBy)
+	if err := s.repo.ResolveReport(reportID, resolvedBy); err != nil {
+		return err
+	}
+
+	// If report involved remote server → notify via federation
+	if report.TargetServer != "" {
+
+		event := &models.FederationEvent{
+			EventType:    models.EventAbuseReportResolved,
+			TargetServer: report.TargetServer,
+			Payload:      []byte{},
+			RetryCount:   0,
+			CreatedAt:    time.Now(),
+		}
+
+		_ = s.repo.EnqueueFederationEvent(event)
+	}
+
+	return nil
 }
+
+// SERVER BLOCKING
 
 func (s *Service) BlockServer(
 	domain string,
@@ -93,7 +126,11 @@ func (s *Service) BlockServer(
 	return s.notifyServerBlock(domain)
 }
 
+// FEDERATION HELPERS
+
 func (s *Service) forwardReport(report *models.Report) error {
+	// Placeholder for real federation HTTP call
+	// Currently simulated failure → forces queue fallback
 	return errors.New("federation unavailable")
 }
 

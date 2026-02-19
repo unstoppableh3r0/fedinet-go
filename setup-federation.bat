@@ -65,12 +65,12 @@ if %errorlevel% neq 0 (
 REM Step 4: Initialize both servers
 echo [4/4] Initializing servers...
 
-echo   - Initializing Server A (port 8080)...
-curl -s -X POST http://localhost:8080/initialize -H "Content-Type: application/json" -d "{\"server_name\": \"Server A\", \"admin_username\": \"admin\", \"admin_password\": \"password123\"}"
+echo   - Initializing Server A (port 8082)...
+curl -s -X POST http://localhost:8082/initialize -H "Content-Type: application/json" -d "{\"server_name\": \"Server A\", \"admin_username\": \"admin\", \"admin_password\": \"password123\"}"
 echo.
 
-echo   - Initializing Server B (port 9080)...
-curl -s -X POST http://localhost:9080/initialize -H "Content-Type: application/json" -d "{\"server_name\": \"Server B\", \"admin_username\": \"admin\", \"admin_password\": \"password123\"}"
+echo   - Initializing Server B (port 9082)...
+curl -s -X POST http://localhost:9082/initialize -H "Content-Type: application/json" -d "{\"server_name\": \"Server B\", \"admin_username\": \"admin\", \"admin_password\": \"password123\"}"
 echo.
 
 echo.
@@ -78,16 +78,16 @@ echo ============================================
 echo   Setup Complete!
 echo ============================================
 echo.
-echo   Server A Identity:    http://localhost:8080
+echo   Server A Identity:    http://localhost:8082
 echo   Server A Federation:  http://localhost:8081
-echo   Server B Identity:    http://localhost:9080
+echo   Server B Identity:    http://localhost:9082
 echo   Server B Federation:  http://localhost:9081
 echo.
 echo   Admin credentials for both: admin / password123
 echo.
 echo   To check health:
-echo     curl http://localhost:8080/health
-echo     curl http://localhost:9080/health
+echo     curl http://localhost:8082/health
+echo     curl http://localhost:9082/health
 echo.
 echo   To stop:
 echo     docker-compose -f docker-compose.federation.yml down

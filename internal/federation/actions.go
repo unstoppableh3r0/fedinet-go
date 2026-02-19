@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,11 +52,12 @@ func SendFederatedActivity(activityID uuid.UUID, targetServer string, activityTy
 
 func DeliverWithRetry(messageID uuid.UUID, targetServer, activityType, actorID string, targetID *string, payload map[string]interface{}, attemptNumber int) error {
 
-	// Server B expects InboxRequest, not FederationRequest
+	// Server B expects InboxRequest
+	actorServer := GetFederationPublicURL()
 	message := models.InboxRequest{
 		ActivityType: activityType,
 		Actor:        actorID,
-		ActorServer:  "http://localhost:8081", // TODO: Get actual server URL
+		ActorServer:  actorServer,
 		Target:       targetID,
 		Payload:      payload,
 	}
@@ -65,15 +67,23 @@ func DeliverWithRetry(messageID uuid.UUID, targetServer, activityType, actorID s
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
-	// Prepare request
-	req, err := http.NewRequest("POST", targetServer+"/federation/inbox", bytes.NewBuffer(jsonData))
+	// Use signed inbox for secure S2S delivery
+	inboxPath := "/federation/signed/inbox"
+	req, err := http.NewRequest("POST", strings.TrimRight(targetServer, "/")+inboxPath, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Add signature headers if needed (TODO: Implement signing)
-	// For now, assume soft federation doesn't strictly require signatures or they are handled elsewhere
+	// Sign the request (Ed25519 HTTP Signature)
+	host := ExtractHost(targetServer)
+	headers, err := SigningHeaders("POST", inboxPath, host, jsonData)
+	if err != nil {
+		return fmt.Errorf("failed to sign request: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -283,8 +293,46 @@ func DispatchActivity(activity *models.InboxActivity) {
 	case "Update":
 		err = HandleProfileUpdate(activity)
 	case "Message":
-		log.Printf("📩 Received Direct Message from %s: %s", activity.ActorID, activity.Payload)
-		// For now, we just acknowledge receipt. Future: store in messages table.
+		log.Printf("📩 Received Direct Message from %s to %s", activity.ActorID, func() string {
+			if activity.TargetID != nil {
+				return *activity.TargetID
+			}
+			return "unknown"
+		}())
+
+		var msgPayload struct {
+			Content  string `json:"content"`
+			Sender   string `json:"sender"`
+			Receiver string `json:"receiver"`
+		}
+		if jsonErr := json.Unmarshal([]byte(activity.Payload), &msgPayload); jsonErr != nil {
+			log.Printf("⚠️ Failed to parse message payload: %v", jsonErr)
+			break
+		}
+
+		sender := msgPayload.Sender
+		if sender == "" {
+			sender = activity.ActorID
+		}
+		receiver := msgPayload.Receiver
+		if receiver == "" && activity.TargetID != nil {
+			receiver = *activity.TargetID
+		}
+		if sender == "" || receiver == "" || msgPayload.Content == "" {
+			log.Printf("⚠️ Message missing required fields: sender=%q receiver=%q", sender, receiver)
+			break
+		}
+
+		_, dbErr := db.Exec(
+			`INSERT INTO messages (sender, receiver, content) VALUES ($1, $2, $3)`,
+			sender, receiver, msgPayload.Content,
+		)
+		if dbErr != nil {
+			log.Printf("❌ Failed to store federated message: %v", dbErr)
+			err = dbErr
+		} else {
+			log.Printf("✅ Stored federated message from %s to %s", sender, receiver)
+		}
 	case "Follow":
 		log.Printf("👤 Received Follow request from %s", activity.ActorID)
 		// Future: Create notification

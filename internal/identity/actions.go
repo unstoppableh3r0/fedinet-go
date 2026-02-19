@@ -1,11 +1,14 @@
 package identity
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,6 +68,13 @@ func SendMessage(senderID, recipientID, content string) error {
 		return err
 	}
 
+	// Forward to remote server if recipient is on a different server
+	go func() {
+		if err := forwardMessageToFederation(senderID, recipientID, content); err != nil {
+			log.Printf("⚠️ Federated message forward failed (will not retry inline): %v", err)
+		}
+	}()
+
 	payload := fmt.Sprintf(`{"content": %q}`, content)
 
 	return LogActivity(
@@ -75,6 +85,109 @@ func SendMessage(senderID, recipientID, content string) error {
 		recipientID,
 		payload,
 	)
+}
+
+// forwardMessageToFederation sends a Message activity to the local federation
+// service when the recipient is on a different server.
+func forwardMessageToFederation(senderID, recipientID, content string) error {
+	senderServer := extractServerFromID(senderID)
+	recipientServer := extractServerFromID(recipientID)
+
+	// Same server — no federation needed.
+	if senderServer == recipientServer {
+		return nil
+	}
+
+	// target_server must be the recipient's FEDERATION URL (not identity URL)
+	targetFederationURL := resolveFederationURL(recipientServer)
+	if targetFederationURL == "" {
+		return fmt.Errorf("cannot resolve federation URL for server %q", recipientServer)
+	}
+
+	federationURL := os.Getenv("FEDERATION_URL")
+	if federationURL == "" {
+		federationURL = "http://localhost:8081"
+	}
+
+	body := map[string]interface{}{
+		"activity_type": "Message",
+		"actor_id":      senderID,
+		"target_server": targetFederationURL,
+		"target_id":     recipientID,
+		"payload": map[string]string{
+			"content":  content,
+			"sender":   senderID,
+			"receiver": recipientID,
+		},
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal federation payload: %w", err)
+	}
+
+	resp, err := http.Post(federationURL+"/federation/send", "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		return fmt.Errorf("federation service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("federation service returned %d", resp.StatusCode)
+	}
+
+	log.Printf("🚀 Message from %s forwarded to federation for delivery to %s (%s)", senderID, recipientID, targetFederationURL)
+	return nil
+}
+
+// extractServerFromID returns the server suffix from a user ID like "alice@server-a".
+func extractServerFromID(userID string) string {
+	parts := strings.SplitN(userID, "@", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return "localhost"
+}
+
+// resolveServerURL maps a server name (as stored in user IDs, e.g. "server-b")
+// to its identity service base URL.
+func resolveServerURL(serverName string) string {
+	serverName = strings.ToLower(serverName)
+	if url := os.Getenv("PEER_SERVER_URL_" + strings.ToUpper(strings.ReplaceAll(serverName, "-", "_"))); url != "" {
+		return url
+	}
+	switch serverName {
+	case "localhost", "server-a", "server_a":
+		return "http://localhost:8082"
+	case "server-b", "server_b":
+		return "http://localhost:9082"
+	}
+	if strings.Contains(serverName, ".") || strings.Contains(serverName, ":") {
+		return "http://" + serverName
+	}
+	return ""
+}
+
+// resolveFederationURL maps a server name to its FEDERATION service URL (for S2S delivery).
+// Federation listens on 8081/9081; identity on 8082/9082.
+// Handles "server-a", "Server A", "server_a" etc.
+func resolveFederationURL(serverName string) string {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(serverName), " ", "-"))
+	normalized = strings.ReplaceAll(normalized, "_", "-")
+	envKey := "PEER_FEDERATION_URL_" + strings.ToUpper(strings.ReplaceAll(normalized, "-", "_"))
+	if url := os.Getenv(envKey); url != "" {
+		return url
+	}
+	switch normalized {
+	case "localhost", "server-a":
+		return "http://localhost:8081"
+	case "server-b":
+		return "http://localhost:9081"
+	}
+	if strings.Contains(normalized, ".") || strings.Contains(normalized, ":") {
+		return "http://" + normalized
+	}
+	return ""
 }
 
 func UpdateBio(identityID, newBio string) error {

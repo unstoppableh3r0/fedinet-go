@@ -142,6 +142,8 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 }
 
 func GetConversations(userID string) ([]models.Message, error) {
+	// Match both internal (bob@localhost) and external (bob@server-b) for federated messages
+	externalID := ToExternalID(userID)
 	query := `
 		WITH latest_messages AS (
 			SELECT DISTINCT ON (
@@ -152,7 +154,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 			)
 			id, sender, receiver, content, created_at
 			FROM messages
-			WHERE sender = $1 OR receiver = $1
+			WHERE sender IN ($1, $2) OR receiver IN ($1, $2)
 			ORDER BY 
 				CASE 
 					WHEN sender < receiver THEN sender || '-' || receiver
@@ -166,7 +168,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 		LIMIT 50
 	`
 
-	rows, err := db.Query(query, userID)
+	rows, err := db.Query(query, userID, externalID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,16 +189,19 @@ func GetConversations(userID string) ([]models.Message, error) {
 }
 
 func GetConversationMessages(userID, otherUserID string) ([]models.Message, error) {
+	// Match both internal/external forms for local user; remote user may have one form (e.g. alice@server-a)
+	userExternal := ToExternalID(userID)
+	otherExternal := ToExternalID(otherUserID)
 	query := `
 		SELECT id, sender, receiver, content, created_at
 		FROM messages
-		WHERE (sender = $1 AND receiver = $2)
-		   OR (sender = $2 AND receiver = $1)
+		WHERE ((sender IN ($1, $2) AND receiver IN ($3, $4))
+		   OR (sender IN ($3, $4) AND receiver IN ($1, $2)))
 		ORDER BY created_at ASC
 		LIMIT 100
 	`
 
-	rows, err := db.Query(query, userID, otherUserID)
+	rows, err := db.Query(query, userID, userExternal, otherUserID, otherExternal)
 	if err != nil {
 		return nil, err
 	}

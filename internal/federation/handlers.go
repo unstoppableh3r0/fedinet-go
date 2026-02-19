@@ -3,6 +3,7 @@ package federation
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,18 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
+
+// normalizePublicKeyToHex converts base64 or hex public key to hex for VerifySignature.
+func normalizePublicKeyToHex(pubKey string) string {
+	if _, err := hex.DecodeString(pubKey); err == nil {
+		return pubKey // already hex
+	}
+	raw, err := base64.StdEncoding.DecodeString(pubKey)
+	if err != nil {
+		return pubKey // return as-is, will fail in VerifySignature
+	}
+	return hex.EncodeToString(raw)
+}
 
 
 
@@ -158,8 +171,10 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		signingString := strings.Join(signingParts, "\n")
 
-		
-		valid, err := crypto.VerifySignature([]byte(signingString), params.Signature, publicKey)
+		// Normalize public key: init stores base64, VerifySignature expects hex
+		pubKeyHex := normalizePublicKeyToHex(publicKey)
+
+		valid, err := crypto.VerifySignature([]byte(signingString), params.Signature, pubKeyHex)
 		if err != nil {
 			sendError(w, http.StatusUnauthorized, "verification_error",
 				"Signature verification failed", err.Error())

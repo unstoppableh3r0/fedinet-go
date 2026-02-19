@@ -118,8 +118,19 @@ CREATE TABLE IF NOT EXISTS migration_status (
   completed_at TIMESTAMP
 );
 
+-- Block events table (for user blocking)
+CREATE TABLE IF NOT EXISTS block_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    blocker_id TEXT NOT NULL,
+    blocked_id TEXT NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT now(),
+    UNIQUE(blocker_id, blocked_id)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author);
 CREATE INDEX IF NOT EXISTS idx_activities_actor ON activities(actor_id);
+CREATE INDEX IF NOT EXISTS idx_block_events_blocker ON block_events(blocker_id);

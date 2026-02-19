@@ -48,6 +48,7 @@ func main() {
 
 	// Signed request endpoints (signature verification middleware)
 	mux.HandleFunc("/federation/signed/inbox", federation.VerifySignatureMiddleware(federation.InboxHandler))
+	mux.HandleFunc("/federation/lookup", federation.VerifySignatureMiddleware(federation.HandleFederatedLookup))
 
 	handler := corsMiddleware(mux)
 

@@ -48,6 +48,8 @@ func ApplyMigrations() {
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS metadata JSONB;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS did TEXT;`,
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS password_hash TEXT;`,
+		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS client_public_key TEXT;`,
+		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS allow_discovery BOOLEAN DEFAULT true;`,
 
 		`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS version INT DEFAULT 1;`,
 
@@ -68,6 +70,16 @@ func ApplyMigrations() {
 			signature TEXT NOT NULL,
 			PRIMARY KEY (blocker_id, blocked_id),
 			FOREIGN KEY (blocker_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// Trusted servers for federation
+		`CREATE TABLE IF NOT EXISTS trusted_servers (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			server_id TEXT NOT NULL UNIQUE,
+			server_name TEXT NOT NULL,
+			public_key TEXT NOT NULL DEFAULT '',
+			endpoint TEXT NOT NULL,
+			trusted_at TIMESTAMP DEFAULT NOW()
 		);`,
 
 		`CREATE TABLE IF NOT EXISTS outbox_activities (
@@ -245,6 +257,23 @@ func ApplyMigrations() {
 			is_read BOOLEAN DEFAULT FALSE,
 			created_at TIMESTAMP DEFAULT NOW(),
 			FOREIGN KEY (recipient_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// ActivityStreams 2.0 payload column (added after initial schema)
+		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS activity_stream JSONB;`,
+
+		// Cache table for profile data received from federated (remote) servers.
+		// Keyed by the internal user_id (e.g. alice@server_b).
+		`CREATE TABLE IF NOT EXISTS remote_profiles (
+			user_id       TEXT PRIMARY KEY,
+			display_name  TEXT NOT NULL DEFAULT '',
+			bio           TEXT NOT NULL DEFAULT '',
+			avatar_url    TEXT NOT NULL DEFAULT '',
+			banner_url    TEXT NOT NULL DEFAULT '',
+			location      TEXT NOT NULL DEFAULT '',
+			portfolio_url TEXT NOT NULL DEFAULT '',
+			version       INT  NOT NULL DEFAULT 0,
+			updated_at    TIMESTAMP DEFAULT NOW()
 		);`,
 	}
 

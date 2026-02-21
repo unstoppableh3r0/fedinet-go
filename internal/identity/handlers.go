@@ -2,11 +2,184 @@ package identity
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 )
+
+func FollowHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("---- /follow HIT ----")
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Follower string `json:"follower"`
+		Followee string `json:"followee"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	if req.Follower == "" || req.Followee == "" {
+		RespondWithError(w, http.StatusBadRequest, "missing fields")
+		return
+	}
+
+	internalFollower := ToInternalID(req.Follower)
+	internalFollowee := ToInternalID(req.Followee)
+
+	if err := FollowUser(internalFollower, internalFollowee); err != nil {
+		RespondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "followed"})
+}
+
+func MessageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		From    string `json:"from"`
+		To      string `json:"to"`
+		Content string `json:"content"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	if req.From == "" || req.To == "" || req.Content == "" {
+		RespondWithError(w, http.StatusBadRequest, "missing fields")
+		return
+	}
+
+	// Check if this is a federated message (recipient on another server)
+	isFederated, serverName := IsFederatedUser(req.To)
+
+	if isFederated {
+		// Deliver to remote server
+		log.Printf("Routing federated message from %s to %s (server: %s)", req.From, req.To, serverName)
+
+		err := DeliverFederatedMessage(ToInternalID(req.From), req.To, req.Content)
+		if err != nil {
+			log.Printf("Failed to deliver federated message: %v", err)
+			RespondWithError(w, http.StatusBadGateway, fmt.Sprintf("failed to deliver message: %v", err))
+			return
+		}
+
+		// Store a copy for sender's message history
+		if err := StoreSentFederatedMessage(ToInternalID(req.From), req.To, req.Content); err != nil {
+			log.Printf("Warning: failed to store sent message copy: %v", err)
+			// Don't fail the request - message was already delivered
+		}
+
+		RespondWithJSON(w, http.StatusOK, map[string]string{
+			"message": "federated message sent",
+			"server":  serverName,
+		})
+		return
+	}
+
+	// Local message - use existing logic
+	if err := SendMessage(ToInternalID(req.From), ToInternalID(req.To), req.Content); err != nil {
+		RespondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "message sent"})
+}
+
+func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Println("PANIC recovered:", rec)
+			RespondWithError(w, http.StatusInternalServerError, "internal server error")
+		}
+	}()
+
+	log.Println("---- /user/search HIT ----")
+
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		RespondWithError(w, http.StatusBadRequest, "missing user_id")
+		return
+	}
+
+	log.Printf("Search request: original userID = %s", userID)
+
+	internalUserID := ToInternalID(userID)
+
+	log.Printf("Search request: converted to internalUserID = %s", internalUserID)
+
+	identity, err := GetIdentityByUserID(internalUserID)
+	if err != nil {
+		log.Printf("GetIdentityByUserID error for user %s: %v", internalUserID, err)
+		RespondWithError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if identity == nil {
+		log.Printf("User not found in database: %s", internalUserID)
+		RespondWithError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if !identity.AllowDiscovery {
+		RespondWithError(w, http.StatusForbidden, "profile unavailable")
+		return
+	}
+
+	profile, err := GetProfileByUserID(internalUserID)
+	if err != nil {
+		log.Printf("GetProfileByUserID error for user %s: %v", internalUserID, err)
+		RespondWithError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if profile == nil {
+		RespondWithError(w, http.StatusNotFound, "profile not found")
+		return
+	}
+
+	identity.UserID = ToExternalID(identity.UserID)
+	profile.UserID = ToExternalID(profile.UserID)
+
+	viewerID := r.URL.Query().Get("viewer_id")
+	isFollowing := false
+	if viewerID != "" && viewerID != userID {
+		internalViewerID := ToInternalID(viewerID)
+		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM follows WHERE follower_user_id=$1 AND followee_user_id=$2)", internalViewerID, internalUserID).Scan(&isFollowing)
+		if err != nil {
+			log.Println("Error checking follow status:", err)
+		}
+	}
+
+	response := map[string]interface{}{
+		"identity":     *identity,
+		"profile":      *profile,
+		"is_following": isFollowing,
+	}
+
+	RespondWithJSON(w, http.StatusOK, response)
+}
+
+func strPtr(s string) *string {
+	return &s
+}
+
 func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -41,10 +214,12 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Normalize username
-	req.Username = strings.ToLower(req.Username)
-
-	federatedUserID := req.Username + "@" + InternalServerName
+	// Convert username to internal format
+	federatedUserID := ToInternalID(strings.ToLower(req.Username))
+	if identity, err := GetIdentityByUserID(federatedUserID); err == nil && identity != nil {
+		RespondWithError(w, http.StatusConflict, "username taken")
+		return
+	}
 
 	// Hash password
 	hashedPassword, err := HashPassword(req.Password)

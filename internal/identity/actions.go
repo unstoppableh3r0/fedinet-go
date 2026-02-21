@@ -2,7 +2,6 @@ package identity
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -14,33 +13,50 @@ import (
 )
 
 func FollowUser(followerID, followeeID string) error {
+	localEndpoint := getLocalEndpoint()
+
+	// Determine the followee's home server: if it's a federated user, look up
+	// the trusted server endpoint; otherwise use the local endpoint.
+	followeeHomeServer := localEndpoint
+	isFed, followeeServerID := IsFederatedUser(followeeID)
+	if isFed {
+		if ts, err := GetTrustedServer(followeeServerID); err == nil {
+			followeeHomeServer = ts.Endpoint
+		}
+	}
+
 	_, err := db.Exec(
 		`INSERT INTO follows (follower_user_id, follower_home_server, followee_user_id, followee_home_server)
-		 VALUES ($1, 'http://localhost:8082', $2, 'http://localhost:8082')
+		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
-		followerID, followeeID,
+		followerID, localEndpoint, followeeID, followeeHomeServer,
 	)
 	if err != nil {
 		return err
 	}
+
+	// Invalidate cache immediately so the updated lists are visible right away.
+	invalidateFollowCaches(followerID, followeeID)
 
 	if err := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); err != nil {
 		return err
 	}
 
-	
-	return CreateNotification(followeeID, followerID, "FOLLOW", "")
+	return CreateNotification(followeeID, followerID, "FOLLOW", followeeID)
 }
 
 func UnfollowUser(followerID, followeeID string) error {
 	_, err := db.Exec(
-		`DELETE FROM follows 
- 		 WHERE follower_user_id = $1 AND followee_user_id = $2`,
+		`DELETE FROM follows
+		 WHERE follower_user_id = $1 AND followee_user_id = $2`,
 		followerID, followeeID,
 	)
 	if err != nil {
 		return err
 	}
+
+	// Invalidate cache so lists are accurate immediately.
+	invalidateFollowCaches(followerID, followeeID)
 
 	return LogActivity(
 		followerID,
@@ -66,17 +82,17 @@ func SendMessage(senderID, recipientID, content string) error {
 		return err
 	}
 
-	
 	payload := fmt.Sprintf(`{"content": %q}`, content)
+	if logErr := LogActivity(senderID, "MESSAGE", "message", messageID, recipientID, payload); logErr != nil {
+		log.Printf("Warning: failed to log message activity: %v", logErr)
+	}
 
-	return LogActivity(
-		senderID,
-		"MESSAGE",
-		"message",
-		messageID,
-		recipientID,
-		payload,
-	)
+	// Notify recipient with full AS2 payload
+	CreateNotificationWithExtras(recipientID, senderID, "MESSAGE", messageID, map[string]interface{}{
+		"content": content,
+		"to":      recipientID,
+	})
+	return nil
 }
 
 func UpdateBio(identityID, newBio string) error {
@@ -144,7 +160,7 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 		&p.BannerURL,
 		&p.Bio,
 		&p.PortfolioURL,
-		&birthDate, 
+		&birthDate,
 		&p.Location,
 		&p.FollowersVisibility,
 		&p.FollowingVisibility,
@@ -163,7 +179,6 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 		return nil, err
 	}
 
-	
 	if birthDate.Valid {
 		t := birthDate.Time
 		p.BirthDate = &t
@@ -172,19 +187,16 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 	return &p, nil
 }
 
-
 func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 	if !ValidateUserID(userID) {
 		return "", fmt.Errorf("invalid user_id format")
 	}
 
-	
 	pubKey, privKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		return "", err
 	}
 
-	
 	recoveryKey, recoveryHash, err := crypto.GenerateRecoveryKey()
 	if err != nil {
 		return "", err
@@ -196,7 +208,6 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 	}
 	defer tx.Rollback()
 
-	
 	var exists bool
 	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM identities WHERE user_id=$1)", userID).Scan(&exists)
 	if err != nil {
@@ -206,10 +217,9 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", fmt.Errorf("user already exists")
 	}
 
-	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
-		masterKey = "0000000000000000000000000000000000000000000000000000000000000000" 
+		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
 		fmt.Println("WARNING: Using insecure default SERVER_MASTER_KEY")
 	}
 
@@ -218,10 +228,8 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", fmt.Errorf("failed to encrypt private key: %w", err)
 	}
 
-	
 	did := "did:fedinet:" + crypto.HashString(pubKey)
 
-	
 	identityID := uuid.New()
 	_, err = tx.Exec(`
 		INSERT INTO identities (
@@ -232,7 +240,6 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", err
 	}
 
-	
 	_, err = tx.Exec(`
 		INSERT INTO profiles (
 			user_id, display_name, bio, location, 
@@ -241,7 +248,7 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 			$1, $2, 'Just joined Gotham Social', 'Unknown',
 			'public', 'public', NOW(), NOW(), 1
 		)
-	`, userID, userID) 
+	`, userID, userID)
 	if err != nil {
 		return "", err
 	}
@@ -285,26 +292,12 @@ func GetIdentityByUserID(userID string) (*models.Identity, error) {
 		return nil, nil
 	}
 	if err != nil {
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
+
 		return nil, err
 	}
 
 	return &i, nil
 }
-
 
 func UpdateProfile(req models.UpdateProfileRequest) error {
 	query := "UPDATE profiles SET updated_at = NOW(), version = version + 1"
@@ -365,89 +358,14 @@ func UpdateProfile(req models.UpdateProfileRequest) error {
 		return err
 	}
 
-	
 	return propagateProfileUpdate(req.UserID, req)
 }
 
 func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) error {
-	
-	rows, err := db.Query(`
-        SELECT DISTINCT follower_home_server 
-        FROM follows 
-        WHERE followee_user_id = $1 
-        AND follower_home_server != 'http://localhost:8082' -- Exclude local
-        AND follower_home_server != ''
-    `, userID)
-	if err != nil {
-		return err 
-	}
-	defer rows.Close()
-
-	var servers []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err == nil {
-			servers = append(servers, s)
-		}
-	}
-
-	if len(servers) == 0 {
-		return nil
-	}
-
-	
-	
-	
-	
-
-	
-	
-	var currentVersion int
-	db.QueryRow("SELECT version FROM profiles WHERE user_id=$1", userID).Scan(&currentVersion)
-
-	
-	obj := map[string]interface{}{
-		"type":    "Person",
-		"id":      userID, 
-		"version": currentVersion,
-		"updated": time.Now().UTC().Format(time.RFC3339),
-	}
-
-	
-	if req.DisplayName != nil {
-		obj["display_name"] = *req.DisplayName
-	}
-	if req.Bio != nil {
-		obj["bio"] = *req.Bio
-	}
-	
-
-	payload := map[string]interface{}{
-		"@context": "https://www.w3.org/ns/activitystreams",
-		"type":     "Update",
-		"actor":    userID,
-		"object":   obj,
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	
-	
-	for _, server := range servers {
-		_, err := db.Exec(`
-            INSERT INTO outbox_activities (
-                activity_type, actor_id, target_server, payload, delivery_status
-            ) VALUES ($1, $2, $3, $4, 'pending')
-        `, "Update", userID, server, payloadBytes)
-
-		if err != nil {
-			fmt.Printf("Failed to queue update for server %s: %v\n", server, err)
-		}
-	}
-
+	// Deliver asynchronously so the HTTP response returns immediately.
+	// PropagateProfileToTrustedServers fans out to every trusted server via
+	// its own goroutines, so we just call it directly.
+	go PropagateProfileToTrustedServers(userID, req)
 	return nil
 }
 
@@ -467,7 +385,7 @@ func CreatePost(userID, content string) (string, error) {
 }
 
 func ToggleLike(userID, postID string) error {
-	
+
 	var exists bool
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM likes WHERE user_id=$1 AND post_id=$2)", userID, postID).Scan(&exists)
 	if err != nil {
@@ -484,21 +402,24 @@ func ToggleLike(userID, postID string) error {
 		return err
 	}
 
-	
 	if !exists {
 		if err := LogActivity(userID, "LIKE", "post", postID, "", ""); err != nil {
 			return err
 		}
-
-		
-		
 		var authorID string
 		if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
-			if authorID != userID { 
+			if authorID != userID {
 				CreateNotification(authorID, userID, "LIKE", postID)
 			}
 		}
 		return nil
+	}
+	// Unlike: also send an Undo/Like notification so clients can withdraw it
+	var authorID string
+	if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
+		if authorID != userID {
+			CreateNotification(authorID, userID, "UNLIKE", postID)
+		}
 	}
 	return nil
 }
@@ -521,7 +442,17 @@ func ToggleRepost(userID, postID string) error {
 	}
 
 	if !exists {
-		return LogActivity(userID, "REPOST", "post", postID, "", "")
+		if err := LogActivity(userID, "REPOST", "post", postID, "", ""); err != nil {
+			return err
+		}
+		// Notify original author
+		var authorID string
+		if qErr := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); qErr == nil {
+			if authorID != userID {
+				CreateNotification(authorID, userID, "REPOST", postID)
+			}
+		}
+		return nil
 	}
 	return nil
 }
@@ -547,21 +478,24 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 
 	LogActivity(userID, "REPLY", "post", postID, "", payload)
 
-	
-	
+	// Build extras for the richer AS2 Create/Note payload
+	replyExtras := map[string]interface{}{"content": content}
+	if parentID != nil {
+		replyExtras["parent_id"] = *parentID
+	}
+
 	var authorID string
 	if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
 		if authorID != userID {
-			CreateNotification(authorID, userID, "REPLY", postID)
+			CreateNotificationWithExtras(authorID, userID, "REPLY", postID, replyExtras)
 		}
 	}
 
-	
 	if parentID != nil {
 		var parentAuthorID string
 		if err := db.QueryRow("SELECT user_id FROM replies WHERE id=$1", *parentID).Scan(&parentAuthorID); err == nil {
-			if parentAuthorID != userID && parentAuthorID != authorID { 
-				CreateNotification(parentAuthorID, userID, "REPLY", postID)
+			if parentAuthorID != userID && parentAuthorID != authorID {
+				CreateNotificationWithExtras(parentAuthorID, userID, "REPLY", postID, replyExtras)
 			}
 		}
 	}
@@ -693,9 +627,38 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 }
 
 func CreateNotification(recipientID, actorID, typeStr, entityID string) error {
+	return CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID, nil)
+}
+
+// CreateNotificationWithExtras stores a notification and its full ActivityStreams 2.0 payload.
+// extras can carry "content", "parent_id", "server_name", "to" for richer AS2 objects.
+// If the recipient is on a different server the notification is delivered federatedly.
+func CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID string, extras map[string]interface{}) error {
+	// Build the AS2 payload first (needed for both local and federated paths).
+	as2Bytes, as2Err := BuildActivityStream(actorID, typeStr, entityID, extras)
+	if as2Err != nil {
+		log.Printf("Warning: could not build ActivityStream for %s/%s: %v", typeStr, entityID, as2Err)
+	}
+
+	// Detect cross-server recipients and deliver federatedly.
+	if isFed, _ := IsFederatedUser(recipientID); isFed {
+		go DeliverFederatedNotification(recipientID, actorID, typeStr, entityID, as2Bytes)
+		return nil
+	}
+
+	// Local recipient — store in DB.
+	if as2Err != nil {
+		// Fall back: insert without activity_stream
+		_, err := db.Exec(`
+			INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
+			VALUES ($1, $2, $3, $4, NOW())
+		`, recipientID, actorID, typeStr, entityID)
+		return err
+	}
+
 	_, err := db.Exec(`
-		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
-		VALUES ($1, $2, $3, $4, NOW())
-	`, recipientID, actorID, typeStr, entityID)
+		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, activity_stream, created_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+	`, recipientID, actorID, typeStr, entityID, as2Bytes)
 	return err
 }

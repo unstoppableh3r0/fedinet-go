@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS identities (
   key_version INTEGER DEFAULT 1,
   recovery_key_hash TEXT DEFAULT '',
   password_hash TEXT DEFAULT '',
+  client_public_key TEXT,
   allow_discovery BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP DEFAULT now()

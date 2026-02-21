@@ -107,6 +107,20 @@ func ApplyMigrations() {
 
 		// ActivityStreams 2.0 payload column (added after initial schema)
 		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS activity_stream JSONB;`,
+
+		// Cache table for profile data received from federated (remote) servers.
+		// Keyed by the internal user_id (e.g. alice@server_b).
+		`CREATE TABLE IF NOT EXISTS remote_profiles (
+			user_id       TEXT PRIMARY KEY,
+			display_name  TEXT NOT NULL DEFAULT '',
+			bio           TEXT NOT NULL DEFAULT '',
+			avatar_url    TEXT NOT NULL DEFAULT '',
+			banner_url    TEXT NOT NULL DEFAULT '',
+			location      TEXT NOT NULL DEFAULT '',
+			portfolio_url TEXT NOT NULL DEFAULT '',
+			version       INT  NOT NULL DEFAULT 0,
+			updated_at    TIMESTAMP DEFAULT NOW()
+		);`,
 	}
 
 	for _, schema := range schemas {

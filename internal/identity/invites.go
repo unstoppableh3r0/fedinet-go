@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -130,16 +131,25 @@ func UseInvite(code string, userID string, ip string, userAgent string) error {
 	defer tx.Rollback()
 
 	var inviteID string
+	var maxUses, currentUses int
 	err = tx.QueryRow(`
-		SELECT id FROM invites WHERE invite_code = $1 FOR UPDATE
-	`, code).Scan(&inviteID)
+		SELECT id, max_uses, current_uses FROM invites WHERE invite_code = $1 FOR UPDATE
+	`, code).Scan(&inviteID, &maxUses, &currentUses)
 	if err != nil {
 		return err
 	}
 
+	newUses := currentUses + 1
+	// Auto-revoke when the last available use is consumed.
+	// max_uses of 0 or -1 means unlimited.
+	autoRevoke := maxUses > 0 && newUses >= maxUses
+
 	_, err = tx.Exec(`
-		UPDATE invites SET current_uses = current_uses + 1 WHERE id = $1
-	`, inviteID)
+		UPDATE invites
+		SET current_uses = $1,
+		    revoked = CASE WHEN $2 THEN true ELSE revoked END
+		WHERE id = $3
+	`, newUses, autoRevoke, inviteID)
 	if err != nil {
 		return err
 	}
@@ -191,6 +201,16 @@ func ListInvites() ([]Invite, error) {
 		if expiresAt.Valid {
 			i.ExpiresAt = &expiresAt.Time
 		}
+		// Treat date-expired and use-exhausted invites as effectively revoked
+		// even before the sweeper has run.
+		if !i.Revoked {
+			if i.ExpiresAt != nil && time.Now().After(*i.ExpiresAt) {
+				i.Revoked = true
+			}
+			if i.MaxUses > 0 && i.CurrentUses >= i.MaxUses {
+				i.Revoked = true
+			}
+		}
 		invites = append(invites, i)
 	}
 	return invites, nil
@@ -226,4 +246,51 @@ func GenerateInviteQR(code string) ([]byte, error) {
 	}
 
 	return qrcode.Encode(string(jsonData), qrcode.Medium, 256)
+}
+
+// startInviteSweeper runs a background goroutine that periodically revokes
+// invites whose expiry date has passed. It runs every minute and is safe to
+// call from main() alongside other startup workers.
+func startInviteSweeper() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		log.Println("Invite expiry sweeper started (interval: 1m)")
+		for range ticker.C {
+			sweepExpiredInvites()
+		}
+	}()
+}
+
+// sweepExpiredInvites marks as revoked any invite whose expires_at has passed
+// or whose current_uses has met or exceeded max_uses (max_uses > 0).
+func sweepExpiredInvites() {
+	// Revoke date-expired invites.
+	res, err := db.Exec(`
+		UPDATE invites
+		SET revoked = true
+		WHERE revoked = false
+		  AND expires_at IS NOT NULL
+		  AND expires_at < NOW()
+	`)
+	if err != nil {
+		log.Printf("[invite-sweep] error revoking expired invites: %v", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("[invite-sweep] revoked %d expired invite(s)", n)
+	}
+
+	// Revoke use-exhausted invites (belt-and-suspenders in case UseInvite
+	// was called concurrently and the auto-revoke flag was missed in a race).
+	res, err = db.Exec(`
+		UPDATE invites
+		SET revoked = true
+		WHERE revoked = false
+		  AND max_uses > 0
+		  AND current_uses >= max_uses
+	`)
+	if err != nil {
+		log.Printf("[invite-sweep] error revoking exhausted invites: %v", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("[invite-sweep] revoked %d exhausted invite(s)", n)
+	}
 }

@@ -57,6 +57,11 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 }
 
 func GetFollowers(userID string) ([]models.UserDocument, error) {
+	// Serve from cache when available.
+	if cached, ok := getFollowersCache(userID); ok {
+		return cached, nil
+	}
+
 	query := `
 		SELECT f.follower_user_id
 		FROM follows f
@@ -112,10 +117,19 @@ func GetFollowers(userID string) ([]models.UserDocument, error) {
 		})
 	}
 
-	return followers, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	setFollowersCache(userID, followers)
+	return followers, nil
 }
 
 func GetFollowing(userID string) ([]models.UserDocument, error) {
+	// Serve from cache when available.
+	if cached, ok := getFollowingCache(userID); ok {
+		return cached, nil
+	}
+
 	query := `
 		SELECT f.followee_user_id
 		FROM follows f
@@ -171,7 +185,11 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 		})
 	}
 
-	return following, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	setFollowingCache(userID, following)
+	return following, nil
 }
 
 func GetConversations(userID string) ([]models.Message, error) {

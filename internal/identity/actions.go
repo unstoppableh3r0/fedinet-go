@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -14,15 +13,30 @@ import (
 )
 
 func FollowUser(followerID, followeeID string) error {
+	localEndpoint := getLocalEndpoint()
+
+	// Determine the followee's home server: if it's a federated user, look up
+	// the trusted server endpoint; otherwise use the local endpoint.
+	followeeHomeServer := localEndpoint
+	isFed, followeeServerID := IsFederatedUser(followeeID)
+	if isFed {
+		if ts, err := GetTrustedServer(followeeServerID); err == nil {
+			followeeHomeServer = ts.Endpoint
+		}
+	}
+
 	_, err := db.Exec(
 		`INSERT INTO follows (follower_user_id, follower_home_server, followee_user_id, followee_home_server)
-		 VALUES ($1, 'http://localhost:8082', $2, 'http://localhost:8082')
+		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
-		followerID, followeeID,
+		followerID, localEndpoint, followeeID, followeeHomeServer,
 	)
 	if err != nil {
 		return err
 	}
+
+	// Invalidate cache immediately so the updated lists are visible right away.
+	invalidateFollowCaches(followerID, followeeID)
 
 	if err := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); err != nil {
 		return err
@@ -33,13 +47,16 @@ func FollowUser(followerID, followeeID string) error {
 
 func UnfollowUser(followerID, followeeID string) error {
 	_, err := db.Exec(
-		`DELETE FROM follows 
- 		 WHERE follower_user_id = $1 AND followee_user_id = $2`,
+		`DELETE FROM follows
+		 WHERE follower_user_id = $1 AND followee_user_id = $2`,
 		followerID, followeeID,
 	)
 	if err != nil {
 		return err
 	}
+
+	// Invalidate cache so lists are accurate immediately.
+	invalidateFollowCaches(followerID, followeeID)
 
 	return LogActivity(
 		followerID,
@@ -345,72 +362,10 @@ func UpdateProfile(req models.UpdateProfileRequest) error {
 }
 
 func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) error {
-
-	rows, err := db.Query(`
-        SELECT DISTINCT follower_home_server 
-        FROM follows 
-        WHERE followee_user_id = $1 
-        AND follower_home_server != 'http://localhost:8082' -- Exclude local
-        AND follower_home_server != ''
-    `, userID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	var servers []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err == nil {
-			servers = append(servers, s)
-		}
-	}
-
-	if len(servers) == 0 {
-		return nil
-	}
-
-	var currentVersion int
-	db.QueryRow("SELECT version FROM profiles WHERE user_id=$1", userID).Scan(&currentVersion)
-
-	obj := map[string]interface{}{
-		"type":    "Person",
-		"id":      userID,
-		"version": currentVersion,
-		"updated": time.Now().UTC().Format(time.RFC3339),
-	}
-
-	if req.DisplayName != nil {
-		obj["display_name"] = *req.DisplayName
-	}
-	if req.Bio != nil {
-		obj["bio"] = *req.Bio
-	}
-
-	payload := map[string]interface{}{
-		"@context": "https://www.w3.org/ns/activitystreams",
-		"type":     "Update",
-		"actor":    userID,
-		"object":   obj,
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	for _, server := range servers {
-		_, err := db.Exec(`
-            INSERT INTO outbox_activities (
-                activity_type, actor_id, target_server, payload, delivery_status
-            ) VALUES ($1, $2, $3, $4, 'pending')
-        `, "Update", userID, server, payloadBytes)
-
-		if err != nil {
-			fmt.Printf("Failed to queue update for server %s: %v\n", server, err)
-		}
-	}
-
+	// Deliver asynchronously so the HTTP response returns immediately.
+	// PropagateProfileToTrustedServers fans out to every trusted server via
+	// its own goroutines, so we just call it directly.
+	go PropagateProfileToTrustedServers(userID, req)
 	return nil
 }
 

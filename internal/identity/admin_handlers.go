@@ -7,19 +7,15 @@ import (
 	"strings"
 )
 
-
-
-
 func AdminAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		
+
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			RespondWithError(w, http.StatusUnauthorized, "missing authorization header")
 			return
 		}
 
-		
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			RespondWithError(w, http.StatusUnauthorized, "invalid authorization header format")
@@ -28,7 +24,6 @@ func AdminAuthMiddleware(next http.Handler) http.Handler {
 
 		tokenString := parts[1]
 
-		
 		claims, err := ValidateJWT(tokenString)
 		if err != nil {
 			RespondWithError(w, http.StatusUnauthorized, "invalid or expired token")
@@ -40,13 +35,9 @@ func AdminAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		
 		next.ServeHTTP(w, r)
 	})
 }
-
-
-
 
 func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -60,13 +51,11 @@ func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	if !ValidateAdminCredentials(req.Username, req.Password) {
 		RespondWithError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
-	
 	token, err := GenerateJWT(req.Username)
 	if err != nil {
 		log.Println("Failed to generate JWT:", err)
@@ -74,13 +63,11 @@ func AdminLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"token":   token,
 		"message": "login successful",
 	})
 }
-
 
 func GetServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -97,7 +84,6 @@ func GetServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, config)
 }
-
 
 func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
@@ -119,12 +105,10 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	authHeader := r.Header.Get("Authorization")
 	tokenString := strings.Split(authHeader, " ")[1]
 	claims, _ := ValidateJWT(tokenString)
 
-	
 	err := UpdateServerName(req.ServerName, claims.Username)
 	if err != nil {
 		log.Println("Failed to update server name:", err)
@@ -138,6 +122,25 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// notifyAllUsersServerRenamed sends a SERVER_UPDATE notification to every local user.
+func notifyAllUsersServerRenamed(newName string) {
+	rows, err := db.Query(`SELECT user_id FROM identities`)
+	if err != nil {
+		log.Printf("notifyAllUsersServerRenamed: query error: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			continue
+		}
+		// actor_id "system" is a sentinel – no real user
+		if err := CreateNotification(uid, "system", "SYSTEM", "Server renamed to: "+newName); err != nil {
+			log.Printf("notifyAllUsersServerRenamed: failed for %s: %v", uid, err)
+		}
+	}
+}
 
 func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -159,7 +162,6 @@ func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	err := TestDatabaseConnection(req.ConnectionString)
 	if err != nil {
 		RespondWithJSON(w, http.StatusBadRequest, map[string]string{
@@ -174,7 +176,6 @@ func TestDatabaseHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "database connection successful",
 	})
 }
-
 
 func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -193,14 +194,12 @@ func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	err := TestDatabaseConnection(req.NewConnectionString)
 	if err != nil {
 		RespondWithError(w, http.StatusBadRequest, "cannot connect to new database: "+err.Error())
 		return
 	}
 
-	
 	migrationID, err := MigrateDatabase(req.NewConnectionString)
 	if err != nil {
 		log.Println("Failed to start migration:", err)
@@ -214,7 +213,6 @@ func StartMigrationHandler(w http.ResponseWriter, r *http.Request) {
 		"message":      "database migration started",
 	})
 }
-
 
 func GetMigrationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -238,7 +236,6 @@ func GetMigrationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, status)
 }
 
-
 func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -258,7 +255,6 @@ func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -274,8 +270,3 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, stats)
 }
-
-
-
-
-

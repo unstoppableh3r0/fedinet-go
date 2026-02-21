@@ -2,10 +2,10 @@ package identity
 
 import (
 	"log"
+	"strings"
 
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
-
 
 func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 	query := `
@@ -56,8 +56,12 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 	return posts, rows.Err()
 }
 
-
 func GetFollowers(userID string) ([]models.UserDocument, error) {
+	// Serve from cache when available.
+	if cached, ok := getFollowersCache(userID); ok {
+		return cached, nil
+	}
+
 	query := `
 		SELECT f.follower_user_id
 		FROM follows f
@@ -79,16 +83,31 @@ func GetFollowers(userID string) ([]models.UserDocument, error) {
 			continue
 		}
 
-		
 		identity, err := GetIdentityByUserID(followerID)
 		if err != nil {
 			log.Printf("Error getting identity for follower %s: %v", followerID, err)
 			continue
 		}
 
+		// Handle federated users not stored in this server's local DB
+		if identity == nil {
+			uname := followerID
+			if idx := strings.Index(followerID, "@"); idx >= 0 {
+				uname = followerID[:idx]
+			}
+			followers = append(followers, models.UserDocument{
+				Identity: models.Identity{UserID: followerID, AllowDiscovery: true},
+				Profile:  models.Profile{UserID: followerID, DisplayName: uname},
+			})
+			continue
+		}
+
 		profile, err := GetProfileByUserID(followerID)
 		if err != nil {
 			log.Printf("Error getting profile for follower %s: %v", followerID, err)
+			continue
+		}
+		if profile == nil {
 			continue
 		}
 
@@ -98,11 +117,19 @@ func GetFollowers(userID string) ([]models.UserDocument, error) {
 		})
 	}
 
-	return followers, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	setFollowersCache(userID, followers)
+	return followers, nil
 }
 
-
 func GetFollowing(userID string) ([]models.UserDocument, error) {
+	// Serve from cache when available.
+	if cached, ok := getFollowingCache(userID); ok {
+		return cached, nil
+	}
+
 	query := `
 		SELECT f.followee_user_id
 		FROM follows f
@@ -124,16 +151,31 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 			continue
 		}
 
-		
 		identity, err := GetIdentityByUserID(followeeID)
 		if err != nil {
 			log.Printf("Error getting identity for followee %s: %v", followeeID, err)
 			continue
 		}
 
+		// Handle federated users not stored in this server's local DB
+		if identity == nil {
+			uname := followeeID
+			if idx := strings.Index(followeeID, "@"); idx >= 0 {
+				uname = followeeID[:idx]
+			}
+			following = append(following, models.UserDocument{
+				Identity: models.Identity{UserID: followeeID, AllowDiscovery: true},
+				Profile:  models.Profile{UserID: followeeID, DisplayName: uname},
+			})
+			continue
+		}
+
 		profile, err := GetProfileByUserID(followeeID)
 		if err != nil {
 			log.Printf("Error getting profile for followee %s: %v", followeeID, err)
+			continue
+		}
+		if profile == nil {
 			continue
 		}
 
@@ -143,9 +185,12 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 		})
 	}
 
-	return following, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	setFollowingCache(userID, following)
+	return following, nil
 }
-
 
 func GetConversations(userID string) ([]models.Message, error) {
 	query := `
@@ -191,7 +236,6 @@ func GetConversations(userID string) ([]models.Message, error) {
 
 	return conversations, rows.Err()
 }
-
 
 func GetConversationMessages(userID, otherUserID string) ([]models.Message, error) {
 	query := `

@@ -31,10 +31,8 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Username = strings.ToLower(req.Username)
-	federatedUserID := req.Username
-	if !strings.Contains(req.Username, "@") {
-		federatedUserID = req.Username + "@" + InternalServerName
-	}
+	// Convert username to internal format
+	federatedUserID := ToInternalID(req.Username)
 
 	var passwordHash string
 	var homeServer string
@@ -60,12 +58,13 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate Tokens
-	serverURL := os.Getenv("SERVER_URL")
-	if serverURL == "" {
-		serverURL = "http://localhost:8082"
+	// Use SERVER_URL env var which is already set correctly per-server in docker-compose
+	externalURL := os.Getenv("SERVER_URL")
+	if externalURL == "" {
+		externalURL = "http://localhost:8080" // fallback for local dev
 	}
 
-	accessToken, refreshToken, err := GenerateTokenPair(federatedUserID, serverURL)
+	accessToken, refreshToken, err := GenerateTokenPair(federatedUserID, externalURL)
 	if err != nil {
 		log.Println("Token generation failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to generate tokens")
@@ -74,7 +73,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"user_id":       ToExternalID(federatedUserID),
-		"home_server":   serverURL,
+		"home_server":   externalURL,
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
 	})

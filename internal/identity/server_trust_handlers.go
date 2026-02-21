@@ -3,6 +3,7 @@ package identity
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -65,7 +66,7 @@ func GetTrustedServersHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, servers)
 }
 
-// AddTrustedServerHandler adds a new trusted server
+// AddTrustedServerHandler adds a new trusted server via automatic handshake
 func AddTrustedServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -78,9 +79,9 @@ func AddTrustedServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validation
-	if req.ServerID == "" || req.ServerName == "" || req.PublicKey == "" || req.Endpoint == "" {
-		RespondWithError(w, http.StatusBadRequest, "all fields are required")
+	// Validation - public key is no longer required!
+	if req.ServerID == "" || req.ServerName == "" || req.Endpoint == "" {
+		RespondWithError(w, http.StatusBadRequest, "server_id, server_name, and endpoint are required")
 		return
 	}
 
@@ -98,12 +99,21 @@ func AddTrustedServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert new trusted server
+	// Initiate handshake with the remote server
+	log.Printf("Initiating handshake with %s (%s)", req.ServerName, req.Endpoint)
+	handshakeResp, err := InitiateHandshake(req.Endpoint, req.ServerName)
+	if err != nil {
+		log.Printf("Handshake failed with %s: %v", req.ServerName, err)
+		RespondWithError(w, http.StatusBadGateway, fmt.Sprintf("handshake failed: %v", err))
+		return
+	}
+
+	// Store the server with the public key received from handshake
 	id := uuid.New()
 	_, err = db.Exec(`
 		INSERT INTO trusted_servers (id, server_id, server_name, public_key, endpoint, trusted_at)
 		VALUES ($1, $2, $3, $4, $5, NOW())
-	`, id, req.ServerID, req.ServerName, req.PublicKey, req.Endpoint)
+	`, id, req.ServerID, req.ServerName, handshakeResp.PublicKey, req.Endpoint)
 
 	if err != nil {
 		log.Printf("Failed to add trusted server: %v", err)
@@ -111,12 +121,13 @@ func AddTrustedServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Added trusted server: %s (%s)", req.ServerName, req.ServerID)
+	log.Printf("✅ Handshake complete! Added trusted server:  %s (%s)", req.ServerName, req.ServerID)
 
 	RespondWithJSON(w, http.StatusCreated, map[string]interface{}{
-		"success":   true,
-		"server_id": req.ServerID,
-		"message":   "Trusted server added successfully",
+		"success":    true,
+		"server_id":  req.ServerID,
+		"public_key": handshakeResp.PublicKey,
+		"message":    "Handshake completed and server added successfully",
 	})
 }
 
@@ -240,5 +251,51 @@ func GetServerPublicKeyHandler(w http.ResponseWriter, r *http.Request) {
 		"server_id":   serverID,
 		"server_name": serverName,
 		"public_key":  publicKey,
+	})
+}
+
+// TestTrustedServerConnectionHandler verifies connectivity to a trusted server from the backend
+func TestTrustedServerConnectionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Endpoint string `json:"endpoint"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Endpoint == "" {
+		RespondWithError(w, http.StatusBadRequest, "endpoint is required")
+		return
+	}
+
+	// Create a client with timeout
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Perform GET request to the health endpoint
+	resp, err := client.Get(req.Endpoint + "/health")
+	if err != nil {
+		log.Printf("Failed to connect to %s: %v", req.Endpoint, err)
+		RespondWithError(w, http.StatusBadGateway, fmt.Sprintf("failed to connect: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		RespondWithError(w, http.StatusBadGateway, fmt.Sprintf("server responded with status: %d", resp.StatusCode))
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Successfully connected to server",
 	})
 }

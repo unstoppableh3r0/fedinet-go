@@ -24,6 +24,9 @@ func main() {
 	// Start session key rotation and cleanup worker
 	go sessionKeyWorker()
 
+	// Start background invite expiry sweeper
+	startInviteSweeper()
+
 	var isInitialized bool
 	var err error
 	isInitialized, err = CheckInitializationStatus()
@@ -63,6 +66,12 @@ func main() {
 
 	// Federated notification endpoint (public, server-to-server)
 	http.HandleFunc("/api/notification/federated", HandleIncomingFederatedNotification)
+
+	// Federated profile update endpoint (public, server-to-server)
+	http.HandleFunc("/api/profile/federated", HandleIncomingProfileUpdate)
+
+	// Federated posts proxy — local user fetching posts from a remote server
+	http.HandleFunc("/api/posts/federated", requireInit(FederatedUserPostsHandler))
 
 	http.HandleFunc("/follow", requireInit(FollowHandler))
 	http.HandleFunc("/message", requireInit(MessageHandler))

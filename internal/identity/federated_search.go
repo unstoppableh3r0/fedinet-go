@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -335,13 +336,20 @@ func GetPublicUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get username from URL path
 	path := r.URL.Path
-	parts := strings.Split(path, "/")
+	parts := strings.Split(strings.TrimRight(path, "/"), "/")
 	if len(parts) < 4 {
 		RespondWithJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "invalid user path",
 		})
 		return
 	}
+
+	// Dispatch to posts sub-handler: /api/users/{username}/posts
+	if parts[len(parts)-1] == "posts" {
+		GetPublicUserPostsHandler(w, r)
+		return
+	}
+
 	username := parts[len(parts)-1]
 
 	// TODO: Verify signature using trusted_servers public key
@@ -386,4 +394,112 @@ func GetPublicUserHandler(w http.ResponseWriter, r *http.Request) {
 		Bio:         bio,
 		HomeServer:  homeServer,
 	})
+}
+
+// GetPublicUserPostsHandler returns the recent public posts for a federated user ID.
+// URL: GET /api/users/{username}/posts
+func GetPublicUserPostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(r.URL.Path, "/")
+	// path: /api/users/{username}/posts  → parts: ["","api","users","{username}","posts"]
+	if len(parts) < 5 || parts[len(parts)-1] != "posts" {
+		RespondWithJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	username := parts[len(parts)-2]
+
+	viewerID := r.URL.Query().Get("viewer_id")
+
+	// Resolve full internal user_id
+	var internalUserID string
+	err := db.QueryRow(
+		`SELECT i.user_id FROM identities i
+		 WHERE i.user_id LIKE $1 OR SPLIT_PART(i.user_id,'@',1)=$2
+		 LIMIT 1`,
+		username+"@%", username,
+	).Scan(&internalUserID)
+	if err == sql.ErrNoRows {
+		RespondWithJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	if err != nil {
+		RespondWithJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	internalViewer := ""
+	if viewerID != "" {
+		internalViewer = ToInternalID(viewerID)
+	}
+
+	posts, err := GetUserPosts(internalUserID, internalViewer, 20, 0)
+	if err != nil {
+		RespondWithJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to fetch posts"})
+		return
+	}
+	for i := range posts {
+		posts[i].Author = ToExternalID(posts[i].Author)
+	}
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{"posts": posts})
+}
+
+// FederatedUserPostsHandler proxies a posts request to a remote server.
+// URL: GET /api/posts/federated?user_id=alice@server_b&viewer_id=bob@server_a
+func FederatedUserPostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		RespondWithJSON(w, http.StatusBadRequest, map[string]string{"error": "user_id required"})
+		return
+	}
+
+	parts := strings.Split(userID, "@")
+	if len(parts) != 2 {
+		RespondWithJSON(w, http.StatusBadRequest, map[string]string{"error": "user_id must be username@server"})
+		return
+	}
+	username, serverID := parts[0], parts[1]
+
+	// Check if it's actually a local user — if so serve directly.
+	if serverID == getServerID() {
+		r.URL.Path = "/api/users/" + username + "/posts"
+		GetPublicUserPostsHandler(w, r)
+		return
+	}
+
+	// Ensure remote server is trusted.
+	remote, _, err := EnsureServerTrusted(serverID)
+	if err != nil {
+		RespondWithJSON(w, http.StatusBadGateway, map[string]string{"error": "cannot reach server: " + err.Error()})
+		return
+	}
+
+	viewerID := r.URL.Query().Get("viewer_id")
+	remoteURL := fmt.Sprintf("%s/api/users/%s/posts", remote.Endpoint, username)
+	if viewerID != "" {
+		remoteURL += "?viewer_id=" + url.QueryEscape(viewerID)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(remoteURL)
+	if err != nil {
+		RespondWithJSON(w, http.StatusBadGateway, map[string]string{"error": "remote request failed"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		RespondWithJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid response from remote"})
+		return
+	}
+	RespondWithJSON(w, resp.StatusCode, result)
 }

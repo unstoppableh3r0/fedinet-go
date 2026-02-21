@@ -248,7 +248,12 @@ func getServerName() string {
 }
 
 func getServerEndpoint() string {
-	endpoint := os.Getenv("SERVER_URL")
+	// Prefer SERVER_ENDPOINT (Docker-internal) for inter-server handshakes;
+	// fall back to SERVER_URL (external) then localhost.
+	endpoint := os.Getenv("SERVER_ENDPOINT")
+	if endpoint == "" {
+		endpoint = os.Getenv("SERVER_URL")
+	}
 	if endpoint == "" {
 		endpoint = "http://localhost:8080"
 	}

@@ -11,14 +11,14 @@ type UserNotification struct {
 	ID        string    `json:"id"`
 	Recipient string    `json:"recipient_id"`
 	Actor     string    `json:"actor_id"`
-	Type      string    `json:"type"`      
-	EntityID  string    `json:"entity_id"` 
+	Type      string    `json:"type"`
+	EntityID  string    `json:"entity_id"`
 	IsRead    bool      `json:"is_read"`
 	CreatedAt time.Time `json:"created_at"`
 
-	
-	ActorName   string `json:"actor_name"`
-	ActorAvatar string `json:"actor_avatar,omitempty"`
+	ActorName      string          `json:"actor_name"`
+	ActorAvatar    string          `json:"actor_avatar,omitempty"`
+	ActivityStream json.RawMessage `json:"activity_stream,omitempty"`
 }
 
 func GetNotificationsHandler(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,7 @@ func GetNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.Query(`
 		SELECT n.id, n.recipient_id, n.actor_id, n.type, n.entity_id, n.is_read, n.created_at,
-		       p.display_name, p.avatar_url
+		       p.display_name, p.avatar_url, n.activity_stream
 		FROM notifications n
 		LEFT JOIN profiles p ON n.actor_id = p.user_id
 		WHERE n.recipient_id = $1
@@ -55,7 +55,8 @@ func GetNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var n UserNotification
 		var displayName, avatarURL *string
-		if err := rows.Scan(&n.ID, &n.Recipient, &n.Actor, &n.Type, &n.EntityID, &n.IsRead, &n.CreatedAt, &displayName, &avatarURL); err != nil {
+		var activityStream []byte
+		if err := rows.Scan(&n.ID, &n.Recipient, &n.Actor, &n.Type, &n.EntityID, &n.IsRead, &n.CreatedAt, &displayName, &avatarURL, &activityStream); err != nil {
 			log.Println("Error scanning notification:", err)
 			continue
 		}
@@ -65,10 +66,13 @@ func GetNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		if displayName != nil {
 			n.ActorName = *displayName
 		} else {
-			n.ActorName = n.Actor 
+			n.ActorName = n.Actor
 		}
 		if avatarURL != nil {
 			n.ActorAvatar = *avatarURL
+		}
+		if len(activityStream) > 0 {
+			n.ActivityStream = json.RawMessage(activityStream)
 		}
 
 		notifications = append(notifications, n)

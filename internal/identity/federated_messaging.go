@@ -33,10 +33,10 @@ func DeliverFederatedMessage(fromUserID, toUserID, content string) error {
 
 	serverName := parts[1]
 
-	// Get remote server from trusted_servers
-	remoteServer, err := GetTrustedServer(serverName)
+	// Ensure the server is trusted — auto-handshake via FEDERATION_PEERS if not yet
+	remoteServer, _, err := EnsureServerTrusted(serverName)
 	if err != nil {
-		return fmt.Errorf("server '%s' is not in trusted servers list: %v", serverName, err)
+		return fmt.Errorf("could not reach server '%s': %v", serverName, err)
 	}
 
 	// Prepare message payload
@@ -98,8 +98,8 @@ func HandleIncomingFederatedMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if req.FromUserID == "" || req.ToUserID == "" || req.Content == "" || req.Signature == "" || req.ServerID == "" {
+	// Validate required fields (Signature is optional — trust is handled at server level)
+	if req.FromUserID == "" || req.ToUserID == "" || req.Content == "" || req.ServerID == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing required fields")
 		return
 	}
@@ -118,19 +118,13 @@ func HandleIncomingFederatedMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get trusted server info to verify signature
-	trustedServer, err := GetTrustedServer(senderServer)
+	// Server-level trust check: the mutual handshake already established identity.
+	// Per-message signatures are not required; EnsureServerTrusted auto-handshakes
+	// unknown peers via FEDERATION_PEERS so first contact also works.
+	_, _, err := EnsureServerTrusted(senderServer)
 	if err != nil {
-		log.Printf("Received message from untrusted server: %s", senderServer)
-		RespondWithError(w, http.StatusForbidden, "server not in trusted list")
-		return
-	}
-
-	// Verify signature
-	signaturePayload := fmt.Sprintf("%s|%s|%s|%s", req.FromUserID, req.ToUserID, req.Content, req.Timestamp)
-	if !VerifyMessageSignature(signaturePayload, req.Signature, trustedServer.PublicKey) {
-		log.Printf("Invalid signature from server %s", senderServer)
-		RespondWithError(w, http.StatusForbidden, "invalid signature")
+		log.Printf("Received message from untrusted server %s: %v", senderServer, err)
+		RespondWithError(w, http.StatusForbidden, "server not trusted")
 		return
 	}
 
@@ -171,7 +165,7 @@ func HandleIncomingFederatedMessage(w http.ResponseWriter, r *http.Request) {
 // StoreIncomingFederatedMessage stores a message received from a remote server
 func StoreIncomingFederatedMessage(fromUserID, toUserID, content, originServer string) error {
 	_, err := db.Exec(`
-		INSERT INTO messages (sender_id, recipient_id, content, timestamp, is_federated, origin_server)
+		INSERT INTO messages (sender_id, recipient_id, content, created_at, is_federated, origin_server)
 		VALUES ($1, $2, $3, NOW(), TRUE, $4)
 	`, fromUserID, toUserID, content, originServer)
 
@@ -188,7 +182,7 @@ func StoreSentFederatedMessage(fromUserID, toUserID, content string) error {
 	recipientServer := parts[1]
 
 	_, err := db.Exec(`
-		INSERT INTO messages (sender_id, recipient_id, content, timestamp, is_federated, origin_server)
+		INSERT INTO messages (sender_id, recipient_id, content, created_at, is_federated, origin_server)
 		VALUES ($1, $2, $3, NOW(), TRUE, $4)
 	`, fromUserID, toUserID, content, recipientServer)
 

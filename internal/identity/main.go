@@ -61,6 +61,9 @@ func main() {
 	// Federated messaging endpoint (public, signature-verified)
 	http.HandleFunc("/api/message/federated", HandleIncomingFederatedMessage)
 
+	// Federated notification endpoint (public, server-to-server)
+	http.HandleFunc("/api/notification/federated", HandleIncomingFederatedNotification)
+
 	http.HandleFunc("/follow", requireInit(FollowHandler))
 	http.HandleFunc("/message", requireInit(MessageHandler))
 	http.HandleFunc("/user/search", requireInit(UserSearchHandler))
@@ -225,14 +228,19 @@ func main() {
 		})
 	})
 
-	log.Println("Go server running on :8082")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8082"
+	}
+	addr := ":" + port
+	log.Printf("Go server running on %s (SERVER_ID=%s)", addr, InternalServerName)
 	if !isInitialized {
 		log.Println("⚠️  Server NOT initialized. Visit /initialize (or admin setup) to configure.")
 	} else {
 		log.Println("✅ Server initialized and ready")
 	}
 
-	log.Fatal(http.ListenAndServe(":8082", enableCORS(http.DefaultServeMux)))
+	log.Fatal(http.ListenAndServe(addr, enableCORS(http.DefaultServeMux)))
 }
 
 // sessionKeyWorker runs periodically to rotate expired keys and cleanup old ones

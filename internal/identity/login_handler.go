@@ -58,13 +58,10 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate Tokens
-	// Return external-facing URL for frontend access (mapped Docker ports)
-	serverID := os.Getenv("SERVER_ID")
-	var externalURL string
-	if serverID == "server-b" {
-		externalURL = "http://localhost:9080"
-	} else {
-		externalURL = "http://localhost:8080"
+	// Use SERVER_URL env var which is already set correctly per-server in docker-compose
+	externalURL := os.Getenv("SERVER_URL")
+	if externalURL == "" {
+		externalURL = "http://localhost:8080" // fallback for local dev
 	}
 
 	accessToken, refreshToken, err := GenerateTokenPair(federatedUserID, externalURL)

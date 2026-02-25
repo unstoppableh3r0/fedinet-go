@@ -9,7 +9,6 @@ import (
 	"os"
 )
 
-
 func SendOTP(toEmail, code string) error {
 	from := os.Getenv("SMTP_FROM")
 	password := os.Getenv("SMTP_PASSWORD")
@@ -18,7 +17,7 @@ func SendOTP(toEmail, code string) error {
 	username := os.Getenv("SMTP_USER")
 
 	if host == "" || port == "" {
-		
+
 		log.Printf("SMTP not configured. OTP for %s is: %s", toEmail, code)
 		return nil
 	}
@@ -54,7 +53,6 @@ func SendOTP(toEmail, code string) error {
 
 	return nil
 }
-
 
 func GenerateOTP(length int) (string, error) {
 	const digits = "0123456789"

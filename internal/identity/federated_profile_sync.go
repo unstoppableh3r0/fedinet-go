@@ -1,4 +1,4 @@
-package main
+package identity
 
 import (
 	"bytes"
@@ -12,13 +12,17 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
-// getLocalEndpoint returns the public endpoint of this server (as seen by peers).
-// Uses SERVER_ENDPOINT env var set in docker-compose.
+// getLocalEndpoint returns the endpoint of this server as reachable by peer servers.
+// Uses SERVER_ENDPOINT (Docker-internal hostname) when available (e.g., inside docker-compose);
+// falls back to SERVER_URL (public address) so peer-to-peer calls work in local dev too.
 func getLocalEndpoint() string {
 	if ep := os.Getenv("SERVER_ENDPOINT"); ep != "" {
 		return ep
 	}
-	return "http://localhost:8082"
+	if u := os.Getenv("SERVER_URL"); u != "" {
+		return u
+	}
+	return "http://localhost:8080"
 }
 
 // PropagateProfileToTrustedServers fans out a profile update to every server

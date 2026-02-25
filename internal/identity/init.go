@@ -14,10 +14,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-
-
-
-
 type ServerInitRequest struct {
 	ServerName    string `json:"server_name"`
 	AdminUsername string `json:"admin_username"`
@@ -38,10 +34,6 @@ type ServerStatusResponse struct {
 	PublicKey   string `json:"public_key,omitempty"`
 }
 
-
-
-
-
 func CheckInitializationStatus() (bool, error) {
 	var initialized bool
 	err := db.QueryRow("SELECT initialized FROM server_identity WHERE id = 1").Scan(&initialized)
@@ -57,12 +49,8 @@ func CheckInitializationStatus() (bool, error) {
 	return initialized, nil
 }
 
-
-
-
-
 func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
-	
+
 	if req.ServerName == "" {
 		return nil, errors.New("server_name is required")
 	}
@@ -76,7 +64,6 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, errors.New("admin_password must be at least 8 characters")
 	}
 
-	
 	initialized, err := CheckInitializationStatus()
 	if err != nil {
 		return nil, err
@@ -85,31 +72,24 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, errors.New("server already initialized")
 	}
 
-	
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	
 	serverID := uuid.New()
 
-	
 	publicKeyB64 := base64.StdEncoding.EncodeToString(publicKey)
 	privateKeyB64 := base64.StdEncoding.EncodeToString(privateKey)
 
-	
-	
 	encryptedPrivateKey := privateKeyB64
 
-	
 	tx, err := db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	
 	_, err = tx.Exec(`
 		INSERT INTO server_identity (id, server_id, server_name, public_key, private_key_encrypted)
 		VALUES (1, $1, $2, $3, $4)
@@ -119,13 +99,11 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, err
 	}
 
-	
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.AdminPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
-	
 	_, err = tx.Exec(`
 		INSERT INTO admins (username, password_hash, is_super_admin, created_by)
 		VALUES ($1, $2, true, NULL)
@@ -135,7 +113,6 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		return nil, err
 	}
 
-	
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -150,10 +127,6 @@ func InitializeServer(req ServerInitRequest) (*ServerInitResponse, error) {
 		PublicKey:  publicKeyB64,
 	}, nil
 }
-
-
-
-
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -171,7 +144,6 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		Initialized: initialized,
 	}
 
-	
 	if initialized {
 		var serverID, serverName, publicKey string
 		err := db.QueryRow(`
@@ -210,10 +182,6 @@ func InitializeHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, response)
 }
-
-
-
-
 
 func GetServerInfoHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

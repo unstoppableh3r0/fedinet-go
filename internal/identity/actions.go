@@ -42,6 +42,12 @@ func FollowUser(followerID, followeeID string) error {
 		return err
 	}
 
+	// Propagate the follow relationship to the remote server's DB so their
+	// /followers endpoint returns the correct list.
+	if isFed {
+		go DeliverFederatedFollow(followerID, followeeID, "follow")
+	}
+
 	return CreateNotification(followeeID, followerID, "FOLLOW", followeeID)
 }
 
@@ -58,14 +64,18 @@ func UnfollowUser(followerID, followeeID string) error {
 	// Invalidate cache so lists are accurate immediately.
 	invalidateFollowCaches(followerID, followeeID)
 
-	return LogActivity(
-		followerID,
-		"UNFOLLOW",
-		"user",
-		followeeID,
-		"",
-		"",
-	)
+	if err := LogActivity(followerID, "UNFOLLOW", "user", followeeID, "", ""); err != nil {
+		return err
+	}
+
+	// Propagate the unfollow to the remote server's DB.
+	if isFed, _ := IsFederatedUser(followeeID); isFed {
+		go DeliverFederatedFollow(followerID, followeeID, "unfollow")
+		// Also send a notification so the followee knows they were unfollowed.
+		go CreateNotification(followeeID, followerID, "UNFOLLOW", followeeID) //nolint:errcheck
+	}
+
+	return nil
 }
 
 func SendMessage(senderID, recipientID, content string) error {

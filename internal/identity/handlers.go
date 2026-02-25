@@ -157,6 +157,13 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 	identity.UserID = ToExternalID(identity.UserID)
 	profile.UserID = ToExternalID(profile.UserID)
 
+	// Compute follower / following counts
+	var followersCount, followingCount int
+	db.QueryRow("SELECT COUNT(*) FROM follows WHERE followee_user_id = $1", internalUserID).Scan(&followersCount)
+	db.QueryRow("SELECT COUNT(*) FROM follows WHERE follower_user_id = $1", internalUserID).Scan(&followingCount)
+	profile.FollowersCount = &followersCount
+	profile.FollowingCount = &followingCount
+
 	viewerID := r.URL.Query().Get("viewer_id")
 	isFollowing := false
 	if viewerID != "" && viewerID != userID {
@@ -231,7 +238,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	// Determine Home Server URL
 	homeServer := os.Getenv("SERVER_URL")
 	if homeServer == "" {
-		homeServer = "http://localhost:8082"
+		homeServer = "http://localhost:8080"
 	}
 
 	// Create Account

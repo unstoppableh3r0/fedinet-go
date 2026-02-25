@@ -13,19 +13,16 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
-
 type AdminClaims struct {
 	Username string `json:"username"`
 	IsAdmin  bool   `json:"is_admin"`
 	jwt.RegisteredClaims
 }
 
-
 type AdminLoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
-
 
 type ServerConfig struct {
 	ServerName string    `json:"server_name"`
@@ -33,11 +30,9 @@ type ServerConfig struct {
 	UpdatedBy  string    `json:"updated_by"`
 }
 
-
 type MigrationRequest struct {
 	NewConnectionString string `json:"new_connection_string"`
 }
-
 
 type MigrationStatus struct {
 	ID             string                 `json:"id"`
@@ -50,7 +45,6 @@ type MigrationStatus struct {
 	CompletedAt    *time.Time             `json:"completed_at"`
 }
 
-
 type ServerStats struct {
 	TotalUsers      int    `json:"total_users"`
 	TotalPosts      int    `json:"total_posts"`
@@ -61,7 +55,6 @@ type ServerStats struct {
 	Uptime          string `json:"uptime"`
 }
 
-
 type Notification struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
@@ -71,9 +64,6 @@ type Notification struct {
 	IsRead    bool      `json:"is_read"`
 	CreatedAt time.Time `json:"created_at"`
 }
-
-
-
 
 func ValidateAdminCredentials(username, password string) bool {
 	adminUser := os.Getenv("ADMIN_USERNAME")
@@ -86,7 +76,6 @@ func ValidateAdminCredentials(username, password string) bool {
 
 	return username == adminUser && password == adminPass
 }
-
 
 func GenerateJWT(username string) (string, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -107,7 +96,6 @@ func GenerateJWT(username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(jwtSecret))
 }
-
 
 func ValidateJWT(tokenString string) (*AdminClaims, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -133,9 +121,6 @@ func ValidateJWT(tokenString string) (*AdminClaims, error) {
 	return nil, fmt.Errorf("invalid token")
 }
 
-
-
-
 func GetServerConfig() (*ServerConfig, error) {
 	var config ServerConfig
 
@@ -146,7 +131,7 @@ func GetServerConfig() (*ServerConfig, error) {
 	`).Scan(&config.ServerName, &config.UpdatedAt, &config.UpdatedBy)
 
 	if err == sql.ErrNoRows {
-		
+
 		config.ServerName = os.Getenv("SERVER_NAME")
 		if config.ServerName == "" {
 			config.ServerName = "localhost"
@@ -163,8 +148,6 @@ func GetServerConfig() (*ServerConfig, error) {
 	return &config, nil
 }
 
-
-
 func UpdateServerName(newName, updatedBy string) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -172,7 +155,6 @@ func UpdateServerName(newName, updatedBy string) error {
 	}
 	defer tx.Rollback()
 
-	
 	_, err = tx.Exec(`
 		INSERT INTO server_config (key, value, updated_by, updated_at)
 		VALUES ('server_name', $1, $2, NOW())
@@ -184,7 +166,6 @@ func UpdateServerName(newName, updatedBy string) error {
 		return fmt.Errorf("failed to update server config: %v", err)
 	}
 
-	
 	err = NotifyAllUsersInTx(tx, "Server Name Updated",
 		fmt.Sprintf("The server name has been changed to: %s. Your username is now username@%s", newName, newName),
 		"server_change")
@@ -195,7 +176,6 @@ func UpdateServerName(newName, updatedBy string) error {
 
 	return tx.Commit()
 }
-
 
 func NotifyAllUsers(title, message, notifType string) error {
 	tx, err := db.Begin()
@@ -212,19 +192,7 @@ func NotifyAllUsers(title, message, notifType string) error {
 	return tx.Commit()
 }
 
-
 func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
-	
-	
-	
-	
-	
-	
-
-	
-	
-	
-	
 
 	_, err := tx.Exec(`
 		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, is_read, created_at)
@@ -235,35 +203,29 @@ func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
 	return err
 }
 
-
 func GetServerStats() (*ServerStats, error) {
 	stats := &ServerStats{}
 
-	
 	err := db.QueryRow("SELECT COUNT(*) FROM identities").Scan(&stats.TotalUsers)
 	if err != nil {
 		return nil, err
 	}
 
-	
 	err = db.QueryRow("SELECT COUNT(*) FROM posts").Scan(&stats.TotalPosts)
 	if err != nil {
 		return nil, err
 	}
 
-	
 	err = db.QueryRow("SELECT COUNT(*) FROM activities").Scan(&stats.TotalActivities)
 	if err != nil {
 		return nil, err
 	}
 
-	
 	err = db.QueryRow("SELECT COUNT(*) FROM follows").Scan(&stats.TotalFollows)
 	if err != nil {
 		return nil, err
 	}
 
-	
 	config, err := GetServerConfig()
 	if err != nil {
 		stats.ServerName = "unknown"
@@ -271,7 +233,6 @@ func GetServerStats() (*ServerStats, error) {
 		stats.ServerName = config.ServerName
 	}
 
-	
 	err = db.Ping()
 	if err != nil {
 		stats.DatabaseStatus = "disconnected"
@@ -279,11 +240,10 @@ func GetServerStats() (*ServerStats, error) {
 		stats.DatabaseStatus = "connected"
 	}
 
-	stats.Uptime = "N/A" 
+	stats.Uptime = "N/A"
 
 	return stats, nil
 }
-
 
 func GetAllUsers() ([]models.UserDocument, error) {
 	rows, err := db.Query(`
@@ -324,7 +284,6 @@ func GetAllUsers() ([]models.UserDocument, error) {
 
 	return users, nil
 }
-
 
 func GetSuggestedUsers(limit int) ([]models.UserDocument, error) {
 	rows, err := db.Query(`
@@ -368,9 +327,6 @@ func GetSuggestedUsers(limit int) ([]models.UserDocument, error) {
 	return users, nil
 }
 
-
-
-
 func TestDatabaseConnection(connectionString string) error {
 	testDB, err := sql.Open("postgres", connectionString)
 	if err != nil {
@@ -385,7 +341,6 @@ func TestDatabaseConnection(connectionString string) error {
 
 	return nil
 }
-
 
 func CreateSchemaOnNewDB(newDB *sql.DB) error {
 	schema := `
@@ -558,9 +513,8 @@ func CreateSchemaOnNewDB(newDB *sql.DB) error {
 	return err
 }
 
-
 func MigrateDatabase(newConnectionString string) (string, error) {
-	
+
 	migrationID := uuid.New().String()
 	currentDB := os.Getenv("DATABASE_URL")
 
@@ -573,18 +527,15 @@ func MigrateDatabase(newConnectionString string) (string, error) {
 		return "", fmt.Errorf("failed to create migration record: %w", err)
 	}
 
-	
 	go performMigration(migrationID, currentDB, newConnectionString)
 
 	return migrationID, nil
 }
 
-
 func performMigration(migrationID, fromDB, toDB string) {
-	
+
 	db.Exec(`UPDATE migration_status SET status = 'in_progress' WHERE id = $1`, migrationID)
 
-	
 	newDB, err := sql.Open("postgres", toDB)
 	if err != nil {
 		recordMigrationError(migrationID, fmt.Sprintf("Failed to connect to new database: %v", err))
@@ -592,14 +543,12 @@ func performMigration(migrationID, fromDB, toDB string) {
 	}
 	defer newDB.Close()
 
-	
 	err = CreateSchemaOnNewDB(newDB)
 	if err != nil {
 		recordMigrationError(migrationID, fmt.Sprintf("Failed to create schema: %v", err))
 		return
 	}
 
-	
 	tables := []string{"identities", "profiles", "posts", "activities", "follows", "messages", "server_config", "notifications"}
 	tableStatus := make(map[string]interface{})
 
@@ -612,12 +561,10 @@ func performMigration(migrationID, fromDB, toDB string) {
 		}
 		tableStatus[table] = "success"
 
-		
 		statusJSON, _ := json.Marshal(tableStatus)
 		db.Exec(`UPDATE migration_status SET tables_migrated = $1 WHERE id = $2`, statusJSON, migrationID)
 	}
 
-	
 	statusJSON, _ := json.Marshal(tableStatus)
 	db.Exec(`
 		UPDATE migration_status 
@@ -628,9 +575,8 @@ func performMigration(migrationID, fromDB, toDB string) {
 	log.Printf("Migration %s completed successfully", migrationID)
 }
 
-
 func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
-	
+
 	rows, err := fromDB.Query(fmt.Sprintf("SELECT * FROM %s", tableName))
 	if err != nil {
 		return err
@@ -642,7 +588,6 @@ func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
 		return err
 	}
 
-	
 	placeholders := ""
 	for i := range columns {
 		if i > 0 {
@@ -656,7 +601,6 @@ func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
 		joinColumns(columns),
 		placeholders)
 
-	
 	for rows.Next() {
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
@@ -678,7 +622,6 @@ func copyTableData(fromDB, toDB *sql.DB, tableName string) error {
 	return rows.Err()
 }
 
-
 func joinColumns(columns []string) string {
 	result := ""
 	for i, col := range columns {
@@ -690,7 +633,6 @@ func joinColumns(columns []string) string {
 	return result
 }
 
-
 func recordMigrationError(migrationID, errorMsg string) {
 	db.Exec(`
 		UPDATE migration_status 
@@ -699,7 +641,6 @@ func recordMigrationError(migrationID, errorMsg string) {
 	`, errorMsg, migrationID)
 	log.Printf("Migration %s failed: %s", migrationID, errorMsg)
 }
-
 
 func GetMigrationStatus(migrationID string) (*MigrationStatus, error) {
 	var status MigrationStatus
@@ -720,17 +661,9 @@ func GetMigrationStatus(migrationID string) (*MigrationStatus, error) {
 		return nil, err
 	}
 
-	
 	if len(tablesJSON) > 0 {
 		json.Unmarshal(tablesJSON, &status.TablesMigrated)
 	}
 
 	return &status, nil
 }
-
-
-
-
-
-
-

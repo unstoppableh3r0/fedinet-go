@@ -8,10 +8,6 @@ import (
 	"testing"
 )
 
-
-
-
-
 func TestRecoverAccountHandler_Validation(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -7,7 +7,6 @@ import (
 	"strconv"
 )
 
-
 func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -20,14 +19,12 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	internalUserID := ToInternalID(userID)
 
-	
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
-	limit := 20 
+	limit := 20
 	offset := 0
 
 	if limitStr != "" {
@@ -42,7 +39,6 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	
 	posts, err := GetFeedPosts(internalUserID, limit, offset)
 	if err != nil {
 		log.Printf("GetFeedHandler error for user %s: %v", internalUserID, err)
@@ -50,7 +46,6 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	for i := range posts {
 		posts[i].Author = ToExternalID(posts[i].Author)
 	}
@@ -61,7 +56,6 @@ func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
 		"offset": offset,
 	})
 }
-
 
 func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -84,7 +78,6 @@ func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	for i := range followers {
 		followers[i].Identity.UserID = ToExternalID(followers[i].Identity.UserID)
 		followers[i].Profile.UserID = ToExternalID(followers[i].Profile.UserID)
@@ -96,7 +89,6 @@ func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -104,24 +96,14 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID     string `json:"user_id"`     
-		FollowerID string `json:"follower_id"` 
+		UserID     string `json:"user_id"`
+		FollowerID string `json:"follower_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-
-	
-	
-	
-	
-	
-	
-	
-	
-	
 
 	if req.UserID == "" || req.FollowerID == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
@@ -131,8 +113,6 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 	me := ToInternalID(req.UserID)
 	them := ToInternalID(req.FollowerID)
 
-	
-	
 	if err := UnfollowUser(them, me); err != nil {
 		log.Println("Remove follower failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "action failed")
@@ -141,7 +121,6 @@ func RemoveFollowerHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "follower removed"})
 }
-
 
 func UnfollowHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -164,7 +143,6 @@ func UnfollowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	internalFollower := ToInternalID(req.Follower)
 	internalFollowee := ToInternalID(req.Followee)
 
@@ -187,7 +165,7 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 		UserID   string  `json:"user_id"`
 		PostID   string  `json:"post_id"`
 		Content  string  `json:"content"`
-		ParentID *string `json:"parent_id"` 
+		ParentID *string `json:"parent_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -229,14 +207,12 @@ func GetPostRepliesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	for i := range replies {
 		replies[i].UserID = ToExternalID(replies[i].UserID)
 	}
 
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{"replies": replies})
 }
-
 
 func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -259,7 +235,6 @@ func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	for i := range following {
 		following[i].Identity.UserID = ToExternalID(following[i].Identity.UserID)
 		following[i].Profile.UserID = ToExternalID(following[i].Profile.UserID)
@@ -270,7 +245,6 @@ func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 		"count":     len(following),
 	})
 }
-
 
 func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -293,7 +267,6 @@ func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	for i := range conversations {
 		conversations[i].Sender = ToExternalID(conversations[i].Sender)
 		conversations[i].Receiver = ToExternalID(conversations[i].Receiver)
@@ -304,7 +277,6 @@ func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 		"count":         len(conversations),
 	})
 }
-
 
 func GetConversationMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -330,7 +302,6 @@ func GetConversationMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	for i := range messages {
 		messages[i].Sender = ToExternalID(messages[i].Sender)
 		messages[i].Receiver = ToExternalID(messages[i].Receiver)

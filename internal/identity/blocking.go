@@ -10,7 +10,6 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
 
-
 func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -29,11 +28,6 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
-	
-	
-	
-
 	var blockerPubKey string
 	err := db.QueryRow("SELECT public_key FROM identities WHERE user_id=$1", req.BlockerID).Scan(&blockerPubKey)
 	if err != nil {
@@ -45,8 +39,6 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
-	
 	msg := []byte("BLOCK:" + req.BlockerID + ":" + req.BlockedID + ":" + req.Reason)
 
 	valid, err := crypto.VerifySignature(msg, req.Signature, blockerPubKey)
@@ -55,7 +47,6 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	_, err = db.Exec(`
         INSERT INTO block_events (blocker_id, blocked_id, reason, signature, created_at)
         VALUES ($1, $2, $3, $4, NOW())
@@ -70,24 +61,18 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	if err := propagateBlock(req.BlockerID, req.BlockedID); err != nil {
-		
-		
+
 	}
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
 }
-
 
 func UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	
-	
 
 	var req struct {
 		BlockerID string `json:"blocker_id"`
@@ -107,7 +92,6 @@ func UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	msg := []byte("UNBLOCK:" + req.BlockerID + ":" + req.BlockedID)
 
 	valid, err := crypto.VerifySignature(msg, req.Signature, blockerPubKey)
@@ -124,7 +108,6 @@ func UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "user unblocked"})
 }
-
 
 func GetBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -163,16 +146,14 @@ func GetBlocksHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func propagateBlock(blockerID, blockedID string) error {
-	
-	
+
 	parts := strings.Split(blockedID, "@")
 	if len(parts) < 2 {
-		
+
 		return nil
 	}
 	targetServer := parts[1]
 
-	
 	payload := map[string]interface{}{
 		"@context": "https://www.w3.org/ns/activitystreams",
 		"type":     "Block",
@@ -185,8 +166,6 @@ func propagateBlock(blockerID, blockedID string) error {
 		return err
 	}
 
-	
-	
 	_, err = db.Exec(`
         INSERT INTO outbox_activities (
             activity_type, actor_id, target_server, target_id, payload, delivery_status

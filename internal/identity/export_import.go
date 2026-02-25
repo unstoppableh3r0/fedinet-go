@@ -11,7 +11,6 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
 
-
 func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
@@ -21,9 +20,8 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 
 	internalID := ToInternalID(userID)
 
-	
 	var identity models.Identity
-	var encryptedPrivKey string 
+	var encryptedPrivKey string
 	err := db.QueryRow(`
         SELECT id, user_id, home_server, public_key, private_key, allow_discovery, created_at, updated_at, key_version, recovery_key_hash
         FROM identities WHERE user_id=$1
@@ -37,7 +35,6 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
 		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -49,9 +46,8 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	identity.UserID = ToExternalID(identity.UserID) 
+	identity.UserID = ToExternalID(identity.UserID)
 
-	
 	profile, err := GetProfileByUserID(internalID)
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch profile")
@@ -59,15 +55,12 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	profile.UserID = ToExternalID(profile.UserID)
 
-	
-	posts, err := GetUserPosts(internalID, "", 1000, 0) 
+	posts, err := GetUserPosts(internalID, "", 1000, 0)
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch posts")
 		return
 	}
 
-	
-	
 	followers := []string{}
 	rows, err := db.Query("SELECT follower_user_id FROM follows WHERE followee_user_id=$1", internalID)
 	if err == nil {
@@ -92,21 +85,18 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	
 	export := models.PortableProfile{
 		User: models.UserDocument{
 			Identity: identity,
 			Profile:  *profile,
 		},
-		PrivateKey: privKey, 
+		PrivateKey: privKey,
 		Posts:      posts,
 		Followers:  followers,
 		Following:  following,
 		ExportedAt: time.Now(),
 	}
 
-	
-	
 	sigPayload := identity.UserID + export.ExportedAt.String()
 	signature, _ := crypto.SignData([]byte(sigPayload), privKey)
 	export.IdentitySig = signature
@@ -114,7 +104,6 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename=profile_export.json")
 	RespondWithJSON(w, http.StatusOK, export)
 }
-
 
 func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -128,8 +117,6 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
-	
 	pubKey := importData.User.Identity.PublicKey
 	sigPayload := importData.User.Identity.UserID + importData.ExportedAt.String()
 	valid, err := crypto.VerifySignature([]byte(sigPayload), importData.IdentitySig, pubKey)
@@ -138,26 +125,17 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	if !ValidateIdentityDocument(&importData.User.Identity) {
 		RespondWithError(w, http.StatusBadRequest, "invalid identity document")
 		return
 	}
 
-	
-	
-	
-	
-	
-
-	
-	
 	if importData.User.Identity.UserID == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing identity in export")
 		return
 	}
 	internalID := ToInternalID(importData.User.Identity.UserID)
-	newHomeServer := "http://localhost:8080" 
+	newHomeServer := "http://localhost:8080"
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -166,7 +144,6 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
 		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -178,8 +155,6 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
-	
 	_, err = tx.Exec(`
         INSERT INTO identities (
             id, user_id, home_server, public_key, private_key, 
@@ -207,7 +182,6 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	p := importData.User.Profile
 	_, err = tx.Exec(`
         INSERT INTO profiles (
@@ -229,7 +203,6 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	for _, post := range importData.Posts {
 		_, err = tx.Exec(`
             INSERT INTO posts (id, author, content, created_at, updated_at)
@@ -245,11 +218,6 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		RespondWithError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
-
-	
-	
-	
-	
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "profile imported successfully"})
 }

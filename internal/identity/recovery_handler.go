@@ -30,10 +30,8 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	internalID := ToInternalID(req.UserID)
 
-	
 	identity, err := GetIdentityByUserID(internalID)
 	if err != nil {
 		log.Println("Recovery lookup error:", err)
@@ -45,9 +43,6 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
-	
-	
 	inputHash := crypto.HashString(req.RecoveryKey)
 
 	if inputHash != identity.RecoveryKeyHash {
@@ -56,14 +51,12 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	newPubKey, newPrivKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "key generation failed")
 		return
 	}
 
-	
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
 		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -74,14 +67,12 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	newRecoveryKey, newRecoveryHash, err := crypto.GenerateRecoveryKey()
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "recovery key generation failed")
 		return
 	}
 
-	
 	tx, err := db.Begin()
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "db error")
@@ -89,8 +80,6 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	
-	
 	_, err = tx.Exec(`
 		INSERT INTO key_revocations (key_id, identity_id, reason, revoked_at, signature)
 		VALUES ($1, $2, 'account_recovery', NOW(), '')
@@ -102,7 +91,6 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	_, err = tx.Exec(`
 		UPDATE identities 
 		SET public_key=$1, private_key=$2, key_version=key_version+1, recovery_key_hash=$3, updated_at=NOW()
@@ -120,7 +108,6 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"message":          "account recovered successfully",
 		"new_private_key":  newPrivKey,

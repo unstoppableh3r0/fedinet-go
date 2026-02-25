@@ -10,7 +10,6 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
 
-
 func RevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -19,9 +18,9 @@ func RevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		IdentityID uuid.UUID `json:"identity_id"`
-		KeyID      string    `json:"key_id"` 
+		KeyID      string    `json:"key_id"`
 		Reason     string    `json:"reason"`
-		Signature  string    `json:"signature"` 
+		Signature  string    `json:"signature"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -29,7 +28,6 @@ func RevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	var currentPubKey string
 	err := db.QueryRow("SELECT public_key FROM identities WHERE id=$1", req.IdentityID).Scan(&currentPubKey)
 	if err != nil {
@@ -41,14 +39,7 @@ func RevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
-	
-	
 	msg := []byte("REVOKE:" + req.KeyID + ":" + req.Reason)
-
-	
-	
-	
 
 	valid, err := crypto.VerifySignature(msg, req.Signature, currentPubKey)
 	if err != nil || !valid {
@@ -56,7 +47,6 @@ func RevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	_, err = db.Exec(`
         INSERT INTO key_revocations (key_id, identity_id, reason, signature, revoked_at)
         VALUES ($1, $2, $3, $4, NOW())
@@ -67,12 +57,10 @@ func RevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	go propagateRevocation(req.IdentityID, req.KeyID, req.Reason, req.Signature)
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "key revoked"})
 }
-
 
 func GetRevocationsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -117,14 +105,13 @@ func GetRevocationsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func propagateRevocation(identityID uuid.UUID, keyID, reason, signature string) {
-	
+
 	var userID string
 	err := db.QueryRow("SELECT user_id FROM identities WHERE id=$1", identityID).Scan(&userID)
 	if err != nil {
 		return
 	}
 
-	
 	rows, err := db.Query(`
         SELECT DISTINCT follower_home_server 
         FROM follows 
@@ -149,10 +136,9 @@ func propagateRevocation(identityID uuid.UUID, keyID, reason, signature string) 
 		return
 	}
 
-	
 	payload := map[string]interface{}{
 		"@context": "https://www.w3.org/ns/activitystreams",
-		"type":     "RevokeKey", 
+		"type":     "RevokeKey",
 		"actor":    userID,
 		"object": map[string]string{
 			"key_id":    keyID,
@@ -163,7 +149,6 @@ func propagateRevocation(identityID uuid.UUID, keyID, reason, signature string) 
 
 	payloadBytes, _ := json.Marshal(payload)
 
-	
 	for _, server := range servers {
 		db.Exec(`
             INSERT INTO outbox_activities (
@@ -172,7 +157,6 @@ func propagateRevocation(identityID uuid.UUID, keyID, reason, signature string) 
         `, "RevokeKey", userID, server, payloadBytes)
 	}
 }
-
 
 func IsKeyRevoked(keyID string) (bool, error) {
 	var exists bool

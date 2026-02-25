@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"os"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -230,8 +231,12 @@ func GenerateInviteQR(code string) ([]byte, error) {
 		return nil, err
 	}
 
+	serverURL := os.Getenv("SERVER_URL")
+	if serverURL == "" {
+		serverURL = "http://localhost:8080"
+	}
 	payload := map[string]string{
-		"server_url":  "http://localhost:8082",
+		"server_url":  serverURL,
 		"server_id":   serverID,
 		"server_name": serverName,
 		"public_key":  publicKey,
@@ -248,10 +253,10 @@ func GenerateInviteQR(code string) ([]byte, error) {
 	return qrcode.Encode(string(jsonData), qrcode.Medium, 256)
 }
 
-// startInviteSweeper runs a background goroutine that periodically revokes
+// StartInviteSweeper runs a background goroutine that periodically revokes
 // invites whose expiry date has passed. It runs every minute and is safe to
 // call from main() alongside other startup workers.
-func startInviteSweeper() {
+func StartInviteSweeper() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()

@@ -165,9 +165,23 @@ func main() {
 	})))
 	mux.Handle("/admin/config/test-db", identity.AdminAuthMiddleware(http.HandlerFunc(identity.TestDatabaseHandler)))
 	mux.Handle("/admin/migrate", identity.AdminAuthMiddleware(http.HandlerFunc(identity.StartMigrationHandler)))
+	mux.Handle("/admin/migrate/start", identity.AdminAuthMiddleware(http.HandlerFunc(identity.StartMigrationHandler)))
 	mux.Handle("/admin/migrate/status", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetMigrationStatusHandler)))
 	mux.Handle("/admin/users", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAllUsersHandler)))
+	mux.Handle("/admin/users/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAllUsersHandler)))
 	mux.Handle("/admin/stats", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetStatsHandler)))
+
+	// Admin invite management
+	mux.Handle("/admin/invites/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.ListInvitesHandler)))
+	mux.Handle("/admin/invites/generate", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GenerateInviteHandler)))
+	mux.Handle("/admin/invites/revoke", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RevokeInviteHandler)))
+	mux.Handle("/admin/invites/qr", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetInviteQRHandler)))
+
+	// Admin trusted-server management (admin-prefixed aliases for the admin panel)
+	mux.Handle("/admin/trusted-servers/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetTrustedServersHandler)))
+	mux.Handle("/admin/trusted-servers/add", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AddTrustedServerHandler)))
+	mux.Handle("/admin/trusted-servers/remove", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RemoveTrustedServerHandler)))
+	mux.Handle("/admin/trusted-servers/test", identity.AdminAuthMiddleware(http.HandlerFunc(identity.TestTrustedServerConnectionHandler)))
 
 	handler := corsMiddleware(mux)
 

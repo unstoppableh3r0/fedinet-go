@@ -270,3 +270,111 @@ func GetStatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, stats)
 }
+
+// ── Invite admin handlers ──────────────────────────────────────────────────
+
+// GET /admin/invites/list
+func ListInvitesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	invites, err := ListInvites()
+	if err != nil {
+		log.Println("Failed to list invites:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to retrieve invites")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"invites": invites,
+	})
+}
+
+// POST /admin/invites/generate
+func GenerateInviteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req GenerateInviteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	// Extract creator username from JWT
+	createdBy := "admin"
+	authHeader := r.Header.Get("Authorization")
+	parts := strings.Split(authHeader, " ")
+	if len(parts) == 2 {
+		if claims, err := ValidateJWT(parts[1]); err == nil {
+			createdBy = claims.Username
+		}
+	}
+
+	invite, err := GenerateInvite(req, createdBy)
+	if err != nil {
+		log.Println("Failed to generate invite:", err)
+		RespondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, invite)
+}
+
+// POST /admin/invites/revoke   body: {"invite_code":"..."}
+func RevokeInviteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		InviteCode string `json:"invite_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.InviteCode == "" {
+		RespondWithError(w, http.StatusBadRequest, "invite_code is required")
+		return
+	}
+
+	if err := RevokeInvite(req.InviteCode); err != nil {
+		log.Println("Failed to revoke invite:", err)
+		RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "invite revoked"})
+}
+
+// GET /admin/invites/qr?code=<invite_code>
+// Returns a PNG QR image.
+func GetInviteQRHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		RespondWithError(w, http.StatusBadRequest, "code query parameter is required")
+		return
+	}
+
+	png, err := GenerateInviteQR(code)
+	if err != nil {
+		log.Println("Failed to generate invite QR:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to generate QR code")
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.WriteHeader(http.StatusOK)
+	w.Write(png)
+}

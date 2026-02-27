@@ -636,6 +636,80 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 	return posts, nil
 }
 
+// UserReply is a reply made by a user, enriched with the parent post context.
+type UserReply struct {
+	ID          string    `json:"id"`
+	PostID      string    `json:"post_id"`
+	PostContent string    `json:"post_content"`
+	PostAuthor  string    `json:"post_author"`
+	Content     string    `json:"content"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// GetUserReplies returns replies written by userID, with the parent post included.
+func GetUserReplies(userID string, limit, offset int) ([]UserReply, error) {
+	rows, err := db.Query(`
+		SELECT r.id, r.post_id,
+		       COALESCE(p.content, '') AS post_content,
+		       COALESCE(p.author,  '') AS post_author,
+		       r.content, r.created_at
+		FROM replies r
+		LEFT JOIN posts p ON p.id = r.post_id
+		WHERE r.user_id = $1
+		ORDER BY r.created_at DESC
+		LIMIT $2 OFFSET $3
+	`, userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var replies []UserReply
+	for rows.Next() {
+		var rep UserReply
+		if err := rows.Scan(&rep.ID, &rep.PostID, &rep.PostContent, &rep.PostAuthor, &rep.Content, &rep.CreatedAt); err != nil {
+			return nil, err
+		}
+		replies = append(replies, rep)
+	}
+	return replies, rows.Err()
+}
+
+// GetUserLikedPosts returns posts liked by userID.
+func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models.Post, error) {
+	rows, err := db.Query(`
+		SELECT p.id, p.author, p.content, p.created_at, p.updated_at,
+		       (SELECT COUNT(*) FROM likes  WHERE post_id = p.id) AS like_count,
+		       (SELECT COUNT(*) FROM replies WHERE post_id = p.id) AS reply_count,
+		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
+		       EXISTS(SELECT 1 FROM likes  WHERE post_id = p.id AND user_id = $2) AS has_liked,
+		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted
+		FROM posts p
+		INNER JOIN likes l ON l.post_id = p.id
+		WHERE l.user_id = $1
+		ORDER BY p.created_at DESC
+		LIMIT $3 OFFSET $4
+	`, userID, viewerUserID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []models.Post
+	for rows.Next() {
+		var p models.Post
+		if err := rows.Scan(
+			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
+			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
+			&p.HasLiked, &p.HasReposted,
+		); err != nil {
+			return nil, err
+		}
+		posts = append(posts, p)
+	}
+	return posts, rows.Err()
+}
+
 func CreateNotification(recipientID, actorID, typeStr, entityID string) error {
 	return CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID, nil)
 }

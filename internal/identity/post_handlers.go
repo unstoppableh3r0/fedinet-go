@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 // ToggleLikeHandler handles POST /post/like
@@ -271,5 +273,81 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"identity": ident,
 		"profile":  profile,
+	})
+}
+
+// GetUserRepliesHandler handles GET /posts/user/replies
+// Query params: user_id (required), limit, offset
+func GetUserRepliesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		RespondWithError(w, http.StatusBadRequest, "user_id required")
+		return
+	}
+	limit, offset := 20, 0
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+		offset = o
+	}
+	replies, err := GetUserReplies(ToInternalID(userID), limit, offset)
+	if err != nil {
+		log.Printf("GetUserReplies error for %s: %v", userID, err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch replies")
+		return
+	}
+	for i := range replies {
+		replies[i].PostAuthor = ToExternalID(replies[i].PostAuthor)
+	}
+	if replies == nil {
+		replies = []UserReply{}
+	}
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"replies": replies,
+	})
+}
+
+// GetUserLikedPostsHandler handles GET /posts/user/likes
+// Query params: user_id (required), viewer_id (optional), limit, offset
+func GetUserLikedPostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		RespondWithError(w, http.StatusBadRequest, "user_id required")
+		return
+	}
+	viewerID := r.URL.Query().Get("viewer_id")
+	if viewerID == "" {
+		viewerID = userID
+	}
+	limit, offset := 20, 0
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+		offset = o
+	}
+	posts, err := GetUserLikedPosts(ToInternalID(userID), ToInternalID(viewerID), limit, offset)
+	if err != nil {
+		log.Printf("GetUserLikedPosts error for %s: %v", userID, err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch liked posts")
+		return
+	}
+	for i := range posts {
+		posts[i].Author = ToExternalID(posts[i].Author)
+	}
+	if posts == nil {
+		posts = []models.Post{}
+	}
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"posts": posts,
 	})
 }

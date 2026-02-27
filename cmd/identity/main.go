@@ -95,6 +95,8 @@ func main() {
 	mux.HandleFunc("/replies", identity.GetPostRepliesHandler)
 	mux.HandleFunc("/posts/recent", identity.GetRecentPostsHandler)
 	mux.HandleFunc("/posts/user", identity.GetUserPostsHandler)
+	mux.HandleFunc("/posts/user/replies", identity.GetUserRepliesHandler)
+	mux.HandleFunc("/posts/user/likes", identity.GetUserLikedPostsHandler)
 
 	// Users
 	mux.HandleFunc("/user/me", identity.MeHandler)
@@ -139,6 +141,7 @@ func main() {
 	mux.HandleFunc("/federation/handshake/ack", identity.HandleHandshakeAcknowledgment)
 	mux.HandleFunc("/federation/profile", identity.HandleIncomingProfileUpdate)
 	mux.HandleFunc("/federation/message", identity.HandleIncomingFederatedMessage)
+	mux.HandleFunc("/api/message/federated", identity.HandleIncomingFederatedMessage) // alias used by DeliverFederatedMessage
 	mux.HandleFunc("/federation/notification", identity.HandleIncomingFederatedNotification)
 	mux.HandleFunc("/api/notification/federated", identity.HandleIncomingFederatedNotification) // alias used by DeliverFederatedNotification
 	mux.HandleFunc("/federation/follow", identity.HandleIncomingFederatedFollow)

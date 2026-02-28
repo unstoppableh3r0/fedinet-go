@@ -1,86 +1,161 @@
-# Running federated-frontend + fedinet-go Locally
+# Running fedinet-go Locally
+
+## Prerequisites
+
+| Tool | Version | Install |
+|------|---------|---------|
+| Docker Desktop | Latest | https://www.docker.com/products/docker-desktop |
+| Docker Compose | Bundled with Docker Desktop | — |
+| Git | Any | https://git-scm.com |
+
+> Docker Desktop must be **running** before any `docker-compose` command.
+
+---
 
 ## What stays local (never pushed to GitHub)
 
 | File | Why |
 |------|-----|
-| `federated-frontend/.env.local` | Contains your local backend URL, already in `.gitignore` |
-| `fedinet-go/.env` | If you create one for local overrides, already in `.gitignore` |
+| `fedinet-go/.env` | Local overrides for env vars — already in `.gitignore` |
+| `federated-frontend/.env.local` | Frontend backend URL — already in `.gitignore` |
 
-> **Note:** `docker-compose.yml` and `docker-compose.federation.yml` _are_ committed to git. They contain hardcoded dev-only credentials (`postgres:postgres`, `password123`, placeholder JWT secrets). That is intentional — these are throwaway local dev values only. Never put real/production credentials in those files.
+> `docker-compose.yml` and `docker-compose.federation.yml` **are** committed. They use throwaway dev-only credentials. Never put real credentials in those files.
 
 ---
 
-## Quick Start
+## How to Run
 
-### 1 — Start the backend (Docker)
+### Option A — Single server (quickest start)
 
-**Single server (simplest):**
 ```bash
+# From the workspace root
 cd fedinet-go
 docker-compose up --build
 ```
-This starts Postgres on `:5432` and Server A identity on `:8080`.
 
-**Full two-server federation:**
+What starts:
+| Service | URL |
+|---------|-----|
+| Server A identity API | http://localhost:8080 |
+| PostgreSQL | localhost:5432 |
+
+---
+
+### Option B — Full two-server federation
+
 ```bash
 cd fedinet-go
 docker-compose -f docker-compose.federation.yml up --build
 ```
-This starts:
-- Server A identity → `http://localhost:8080`
-- Server A federation relay → `http://localhost:8081`
-- Server B identity → `http://localhost:9080`
-- Server B federation relay → `http://localhost:9081`
-- Shared Postgres → `localhost:5432`
+
+What starts:
+| Service | URL |
+|---------|-----|
+| Server A identity API | http://localhost:8080 |
+| Server A federation relay | http://localhost:8081 |
+| Server B identity API | http://localhost:9080 |
+| Server B federation relay | http://localhost:9081 |
+| PostgreSQL (shared) | localhost:5432 |
 
 ---
 
-### 2 — Initialize the server (first run only)
+### Step 2 — Initialize the server (first run only)
 
-After the containers are healthy, hit the init endpoint once to seed the admin account:
+Wait until containers print `listening on :8080`, then seed the admin account:
 
 ```bash
 # Server A
 curl -s -X POST http://localhost:8080/initialize \
   -H "Content-Type: application/json" \
   -d '{"admin_username":"admin","admin_password":"password123","server_name":"Server A"}'
+```
 
+```bash
 # Server B (federation setup only)
 curl -s -X POST http://localhost:9080/initialize \
   -H "Content-Type: application/json" \
   -d '{"admin_username":"admin","admin_password":"password123","server_name":"Server B"}'
 ```
 
-You only need to do this once — Postgres data persists in the `postgres_data` Docker volume between restarts.
+You only need to do this once. Postgres data persists in the `postgres_data` Docker volume between restarts.
+
+**Windows (PowerShell) equivalent:**
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/initialize `
+  -ContentType "application/json" `
+  -Body '{"admin_username":"admin","admin_password":"password123","server_name":"Server A"}'
+```
 
 ---
 
-### 3 — Start the frontend
+### Step 3 — Verify the server is running
 
 ```bash
-cd federated-frontend
-npm install      # first time only
-npm run dev
+curl http://localhost:8080/health
+# Expected: {"status":"ok"} or similar
 ```
-
-Runs on `http://localhost:3000`.
 
 ---
 
-### 4 — Frontend environment file
+### Step 4 — Run the frontend (optional, separate step)
 
-Create `federated-frontend/.env.local` (this file is gitignored, so you manage it yourself):
+See [`federated-frontend/INSTRUCTIONS.md`](../federated-frontend/INSTRUCTIONS.md) for full frontend setup.
 
-```env
-# Single-server setup
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
-
-# If using Server B as well, add:
-# NEXT_PUBLIC_BACKEND_URL_B=http://localhost:9080
+Quick version:
+```bash
+cd federated-frontend
+npm install       # first time only
+npm run dev       # → http://localhost:3000
 ```
 
-This file already exists if you've run the app before. Do not commit it.
+Create `federated-frontend/.env.local` before running:
+```env
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
+```
+
+---
+
+## Stopping everything
+
+```bash
+# Stop containers, keep DB data
+cd fedinet-go
+docker-compose down                                # single-server
+docker-compose -f docker-compose.federation.yml down   # federation
+
+# Stop AND wipe the DB volume (clean slate)
+docker-compose -f docker-compose.federation.yml down -v
+```
+
+**Windows shortcut** (from workspace root):
+```powershell
+.\stop-all.ps1
+```
+
+---
+
+## Running without Docker (Go directly)
+
+If you have Go 1.21+ and a local Postgres instance, you can run the server directly:
+
+```bash
+cd fedinet-go
+
+# Export required env vars (adjust values as needed)
+export DATABASE_URL="postgres://postgres:postgres@localhost:5432/fedinet_timeline?sslmode=disable"
+export JWT_SECRET="dev-secret"
+export PORT=8080
+
+go run ./cmd/identity/...
+```
+
+On Windows PowerShell:
+```powershell
+$env:DATABASE_URL = "postgres://postgres:postgres@localhost:5432/fedinet_timeline?sslmode=disable"
+$env:JWT_SECRET   = "dev-secret"
+$env:PORT         = "8080"
+go run ./cmd/identity/...
+```
 
 ---
 
@@ -93,30 +168,12 @@ This file already exists if you've run the app before. Do not commit it.
 | Postgres DB (single) | `fedinet_timeline` | `docker-compose.yml` |
 | Postgres DBs (federation) | `fedinet_server_a`, `fedinet_server_b` | `docker-compose.federation.yml` + `init-dbs.sql` |
 | Admin username | `admin` | Set at `/initialize` |
-| Admin password | `password123` (default) | Set at `/initialize` → you can use any value |
+| Admin password | `password123` (default) | Set at `/initialize` — change to any value |
 | JWT secret (Server A) | `fedinet-dev-secret-key-server-a` | `docker-compose.federation.yml` → `JWT_SECRET` |
 | JWT secret (Server B) | `fedinet-dev-secret-key-server-b` | `docker-compose.federation.yml` → `JWT_SECRET` |
 | Server identity private key | Long hex string | `docker-compose.federation.yml` → `SERVER_IDENTITY_PRIVATE_KEY` |
 
-> **All of the above are dev-only throwaway values.** For any real deployment, replace every secret (Postgres password, JWT secret, private key) with strong, randomly generated values, and supply them via a secrets manager or a `.env` file that is never committed.
-
----
-
-## Stopping everything
-
-```bash
-# Stop and remove containers (keeps DB volume)
-cd fedinet-go
-docker-compose -f docker-compose.federation.yml down
-
-# Stop and wipe the DB volume (clean slate)
-docker-compose -f docker-compose.federation.yml down -v
-```
-
-Or use the provided PowerShell helper from the workspace root:
-```powershell
-.\stop-all.ps1
-```
+> **All values above are dev-only throwaway values.** For any real deployment, replace every secret with strong randomly generated values supplied via a secrets manager or a `.env` file that is never committed.
 
 ---
 
@@ -124,9 +181,20 @@ Or use the provided PowerShell helper from the workspace root:
 
 | Port | Service |
 |------|---------|
-| 3000 | federated-frontend (Next.js dev) |
 | 8080 | Server A — identity API |
 | 8081 | Server A — federation relay |
 | 9080 | Server B — identity API |
 | 9081 | Server B — federation relay |
 | 5432 | PostgreSQL |
+| 3000 | federated-frontend (Next.js dev) |
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `port is already allocated` | Another process uses that port. Run `docker-compose down` then retry, or change the host port in `docker-compose*.yml`. |
+| `connection refused` on `/initialize` | Containers are still starting. Wait ~10 s and retry. |
+| Database errors after schema change | Run `docker-compose down -v` to wipe the volume, then `up --build`. |
+| Changes to Go code not reflected | Always pass `--build` flag: `docker-compose up --build`. |

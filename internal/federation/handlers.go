@@ -15,19 +15,12 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
-
-
-
-
-
 type SignatureParams struct {
 	KeyID     string
 	Algorithm string
 	Headers   []string
 	Signature string
 }
-
-
 
 func ParseSignatureHeader(header string) (*SignatureParams, error) {
 	params := &SignatureParams{}
@@ -53,10 +46,8 @@ func ParseSignatureHeader(header string) (*SignatureParams, error) {
 	return params, nil
 }
 
-
-
 func FetchServerPublicKey(keyID string) (string, error) {
-	
+
 	var publicKey string
 	err := db.QueryRow(
 		`SELECT public_key FROM identities WHERE user_id = $1`, keyID,
@@ -65,7 +56,6 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	
 	err = db.QueryRow(
 		`SELECT public_key FROM trusted_servers WHERE server_id = $1`, keyID,
 	).Scan(&publicKey)
@@ -74,7 +64,6 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	
 	err = db.QueryRow(
 		`SELECT public_key FROM server_identity WHERE server_id = $1`, keyID,
 	).Scan(&publicKey)
@@ -82,15 +71,12 @@ func FetchServerPublicKey(keyID string) (string, error) {
 		return publicKey, nil
 	}
 
-	
 	doc, err := ResolveAccount(keyID)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch public key for %s: %w", keyID, err)
 	}
 	return doc.Identity.PublicKey, nil
 }
-
-
 
 func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +87,6 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		
 		params, err := ParseSignatureHeader(sigHeader)
 		if err != nil {
 			sendError(w, http.StatusUnauthorized, "invalid_signature_header",
@@ -109,7 +94,6 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		
 		publicKey, err := FetchServerPublicKey(params.KeyID)
 		if err != nil {
 			sendError(w, http.StatusUnauthorized, "key_not_found",
@@ -117,7 +101,6 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		
 		var bodyBytes []byte
 		if r.Body != nil {
 			bodyBytes, err = io.ReadAll(r.Body)
@@ -129,7 +112,6 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
 
-		
 		var signingParts []string
 		for _, h := range params.Headers {
 			switch h {
@@ -141,7 +123,7 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			case "date":
 				signingParts = append(signingParts, "date: "+r.Header.Get("Date"))
 			case "digest":
-				
+
 				digest := sha256.Sum256(bodyBytes)
 				computedDigest := "SHA-256=" + hex.EncodeToString(digest[:])
 				receivedDigest := r.Header.Get("Digest")
@@ -152,13 +134,12 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				}
 				signingParts = append(signingParts, "digest: "+computedDigest)
 			default:
-				
+
 				signingParts = append(signingParts, h+": "+r.Header.Get(http.CanonicalHeaderKey(h)))
 			}
 		}
 		signingString := strings.Join(signingParts, "\n")
 
-		
 		valid, err := crypto.VerifySignature([]byte(signingString), params.Signature, publicKey)
 		if err != nil {
 			sendError(w, http.StatusUnauthorized, "verification_error",
@@ -176,11 +157,6 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-
-
-
-
-
 func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -193,14 +169,11 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	if req.ActivityType == "" || req.Actor == "" || req.ActorServer == "" {
 		sendError(w, http.StatusBadRequest, "missing_fields", "Missing required fields", "")
 		return
 	}
 
-	
-	
 	activityID, err := ProcessInboundActivity(
 		req.ActivityType,
 		req.Actor,
@@ -225,7 +198,6 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -238,7 +210,6 @@ func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	limit := 50
 
 	activities, err := GetOutboxActivities(actorID, limit)
@@ -253,7 +224,6 @@ func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 		"count":      len(activities),
 	})
 }
-
 
 func SendActivityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -297,11 +267,6 @@ func SendActivityHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
-
-
-
-
 func AcknowledgmentHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -328,11 +293,6 @@ func AcknowledgmentHandler(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, http.StatusOK, "Acknowledgment recorded", nil)
 }
 
-
-
-
-
-
 func CapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -348,7 +308,6 @@ func CapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(caps)
 }
-
 
 func DiscoverCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -376,11 +335,6 @@ func DiscoverCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(caps)
 }
-
-
-
-
-
 
 func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -411,11 +365,6 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
-
-
-
-
-
 
 func BlockedServersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -456,7 +405,6 @@ func handleBlockServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	err := BlockServer(req.ServerURL, req.Reason, "system", req.ExpiresAt)
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, "internal_error", "Failed to block server", err.Error())
@@ -485,11 +433,6 @@ func handleUnblockServer(w http.ResponseWriter, r *http.Request) {
 		"server_url": serverURL,
 	})
 }
-
-
-
-
-
 
 func FederationModeHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -536,11 +479,6 @@ func handleSetFederationMode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
-
-
-
-
 func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -575,13 +513,6 @@ func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, http.StatusOK, "Rate limit configured", nil)
 }
 
-
-
-
-
-
-
-
 func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -606,7 +537,6 @@ func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	_, err := db.Exec(`
 		INSERT INTO trusted_servers (server_id, server_name, public_key, endpoint)
 		VALUES ($1, $2, $3, $4)
@@ -624,7 +554,6 @@ func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("🤝 Handshake received from %s (%s)", req.ServerName, req.ServerID)
 
-	
 	var localID, localName, localKey string
 	err = db.QueryRow(`SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1`).
 		Scan(&localID, &localName, &localKey)
@@ -640,8 +569,6 @@ func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		"public_key":  localKey,
 	})
 }
-
-
 
 func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -663,7 +590,6 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	var localID, localName, localKey string
 	err := db.QueryRow(`SELECT server_id, server_name, public_key FROM server_identity WHERE id = 1`).
 		Scan(&localID, &localName, &localKey)
@@ -673,7 +599,6 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	payload := map[string]string{
 		"server_id":   localID,
 		"server_name": localName,
@@ -688,7 +613,6 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	targetURL := strings.TrimRight(req.TargetServer, "/") + "/federation/handshake"
 	log.Printf("🤝 Initiating handshake with %s", targetURL)
 
@@ -717,7 +641,6 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	remoteID, _ := remoteResp.Data["server_id"].(string)
 	remoteName, _ := remoteResp.Data["server_name"].(string)
 	remoteKey, _ := remoteResp.Data["public_key"].(string)
@@ -728,7 +651,6 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	_, err = db.Exec(`
 		INSERT INTO trusted_servers (server_id, server_name, public_key, endpoint)
 		VALUES ($1, $2, $3, $4)
@@ -758,10 +680,6 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		"status": "trusted",
 	})
 }
-
-
-
-
 
 func sendSuccess(w http.ResponseWriter, statusCode int, message string, data map[string]interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -795,11 +713,6 @@ func sendError(w http.ResponseWriter, statusCode int, errorType, message, detail
 	log.Printf("Error [%s]: %s - %s", errorType, message, details)
 }
 
-
-
-
-
-
 func HandleFederatedLookup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -812,14 +725,13 @@ func HandleFederatedLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	
 	doc, err := ResolveAccount(handle)
 	if err != nil {
 		if err.Error() == "identity not found" {
 			sendError(w, http.StatusNotFound, "not_found", "Identity not found", "")
 			return
 		}
-		
+
 		sendError(w, http.StatusInternalServerError, "lookup_failed", "Failed to resolve identity", err.Error())
 		return
 	}
@@ -829,4 +741,68 @@ func HandleFederatedLookup(w http.ResponseWriter, r *http.Request) {
 		"identity": doc.Identity,
 		"profile":  doc.Profile,
 	})
+}
+func enableCORS(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+func GetReportsHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	rows, err := db.Query("SELECT id, activity_id, toxicity_score, status FROM moderation_logs WHERE status = 'processed'")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var reports []map[string]interface{}
+	for rows.Next() {
+		var id, activityID, status string
+		var score float64
+		// Scanning directly from database columns
+		if err := rows.Scan(&id, &activityID, &score, &status); err != nil {
+			continue
+		}
+		reports = append(reports, map[string]interface{}{
+			"id":          id,
+			"activity_id": activityID,
+			"score":       score,
+			"status":      status,
+		})
+	}
+	json.NewEncoder(w).Encode(reports)
+}
+
+func ResolveReportHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow POST for resolution
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract ID (e.g., /reports/{id}/resolve)
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+	reportID := parts[len(parts)-2]
+
+	// Update status in DB
+	_, err := db.Exec("UPDATE moderation_logs SET status = 'resolved' WHERE id = $1", reportID)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Resolved"})
 }

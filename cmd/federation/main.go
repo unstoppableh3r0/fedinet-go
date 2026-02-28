@@ -45,7 +45,16 @@ func main() {
 	mux.HandleFunc("/federation/handshake", federation.HandshakeHandler)
 	mux.HandleFunc("/federation/initiate-handshake", federation.InitiateHandshakeHandler)
 	mux.HandleFunc("/federation/handshake/initiate", federation.InitiateHandshakeHandler)
-
+	mux.HandleFunc("/api/moderation/logs", federation.GetReportsHandler)
+	mux.HandleFunc("/federation/moderation/logs", federation.GetReportsHandler)
+	mux.HandleFunc("/federation/moderation/reports", federation.GetReportsHandler)
+	mux.HandleFunc("/federation/moderation/reports/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			federation.ResolveReportHandler(w, r)
+		} else {
+			federation.GetReportsHandler(w, r)
+		}
+	})
 	// Signed request endpoints (signature verification middleware)
 	mux.HandleFunc("/federation/signed/inbox", federation.VerifySignatureMiddleware(federation.InboxHandler))
 	mux.HandleFunc("/federation/lookup", federation.VerifySignatureMiddleware(federation.HandleFederatedLookup))

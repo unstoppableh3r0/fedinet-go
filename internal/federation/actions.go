@@ -285,6 +285,46 @@ func DispatchActivity(activity *models.InboxActivity) {
 	case "Message":
 		log.Printf("📩 Received Direct Message from %s: %s", activity.ActorID, activity.Payload)
 		// For now, we just acknowledge receipt. Future: store in messages table.
+
+		// 1. Prepare JSON payload
+		payloadData := []byte(fmt.Sprintf(`{"text": "%s"}`, activity.Payload))
+
+		// 2. Call your Python AI Service
+		resp, errTemp := http.Post("http://localhost:9000/moderate", "application/json", bytes.NewBuffer(payloadData))
+		if errTemp == nil {
+			defer resp.Body.Close()
+
+			// 3. Parse result and INSERT into moderation_logs
+			var result map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&result)
+
+			// The AI returns {"result": [{"label": "...", "score": ...}]}
+			// Extract the score or label based on your model's output format.
+			// Defaulting to "processed" status for now.
+			score := 0.0
+			label := "UNKNOWN"
+			if resultData, ok := result["result"].([]interface{}); ok && len(resultData) > 0 {
+				if firstResult, ok := resultData[0].(map[string]interface{}); ok {
+					if s, ok := firstResult["score"].(float64); ok {
+						score = s
+					}
+					if l, ok := firstResult["label"].(string); ok {
+						label = l
+					}
+				}
+			}
+
+			// Perform your DB INSERT here using your database connection
+			_, dbErr := db.Exec("INSERT INTO moderation_logs (activity_id, toxicity_score, status) VALUES ($1, $2, $3)",
+				activity.ID, score, "processed")
+			if dbErr != nil {
+				log.Printf("⚠️ Failed to insert into moderation_logs: %v", dbErr)
+			} else {
+				log.Printf("✅ AI Moderation complete. Label: %s, Score: %f", label, score)
+			}
+		} else {
+			log.Printf("⚠️ Failed to call AI service: %v", errTemp)
+		}
 	case "Follow":
 		log.Printf("👤 Received Follow request from %s", activity.ActorID)
 		// Future: Create notification

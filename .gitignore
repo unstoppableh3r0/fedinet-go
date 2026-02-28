@@ -40,3 +40,10 @@ frontend_test_report.txt
 
 # Local frontend copy (if not part of backend repo)
 frontend/
+
+
+# AI models
+*.safetensors
+*.pt
+*.bin
+cmd/ai_moderation/model/

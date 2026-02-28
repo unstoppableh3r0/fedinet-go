@@ -14,10 +14,6 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-
-
-
-
 func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -89,9 +85,112 @@ func (h *Handler) ResolveReport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ─── USER BLOCK HANDLERS ─────────────────────────────────────────────────────
 
+// POST /users/block
+func (h *Handler) BlockUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 
+	var req struct {
+		BlockerUserID string `json:"blocker_user_id"`
+		BlockedUserID string `json:"blocked_user_id"`
+		Reason        string `json:"reason"`
+	}
 
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.service.BlockUser(req.BlockerUserID, req.BlockedUserID, req.Reason); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"status": "blocked"})
+}
+
+// POST /users/unblock
+func (h *Handler) UnblockUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		BlockerUserID string `json:"blocker_user_id"`
+		BlockedUserID string `json:"blocked_user_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.service.UnblockUser(req.BlockerUserID, req.BlockedUserID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "unblocked"})
+}
+
+// GET /users/blocked?blocker_user_id=...
+func (h *Handler) ListBlockedUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	blockerUserID := r.URL.Query().Get("blocker_user_id")
+	if blockerUserID == "" {
+		http.Error(w, "blocker_user_id query param is required", http.StatusBadRequest)
+		return
+	}
+
+	blocks, err := h.service.ListBlockedUsers(blockerUserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"blocked_users": blocks})
+}
+
+// GET /users/block/check?blocker_user_id=...&blocked_user_id=...
+func (h *Handler) CheckUserBlock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	blockerUserID := r.URL.Query().Get("blocker_user_id")
+	blockedUserID := r.URL.Query().Get("blocked_user_id")
+
+	if blockerUserID == "" || blockedUserID == "" {
+		http.Error(w, "blocker_user_id and blocked_user_id query params are required", http.StatusBadRequest)
+		return
+	}
+
+	isBlocked, err := h.service.IsUserBlocked(blockerUserID, blockedUserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"is_blocked": isBlocked})
+}
+
+// ─── SERVER BLOCK HANDLER ─────────────────────────────────────────────────────
 
 func (h *Handler) BlockServer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

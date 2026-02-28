@@ -16,6 +16,12 @@ type Repository interface {
 	IsServerBlocked(string) (bool, error)
 	ListBlockedServers() ([]models.BlockedServer, error)
 
+	// User-level blocking
+	BlockUser(*models.UserBlock) error
+	UnblockUser(blockerUserID, blockedUserID string) error
+	IsUserBlocked(blockerUserID, blockedUserID string) (bool, error)
+	ListBlockedUsers(blockerUserID string) ([]models.UserBlock, error)
+
 	EnqueueFederationEvent(*models.FederationEvent) error
 	ListPendingFederationEvents() ([]models.FederationEvent, error)
 	IncrementFederationRetry(int64) error
@@ -265,6 +271,99 @@ func (r *repository) ListBlockedServers() ([]models.BlockedServer, error) {
 	}
 
 	return servers, rows.Err()
+}
+
+// ─── USER BLOCKING ───────────────────────────────────────────────────────────
+
+func (r *repository) BlockUser(block *models.UserBlock) error {
+	query := `
+		INSERT INTO user_blocks (
+			blocker_user_id,
+			blocked_user_id,
+			reason,
+			expires_at,
+			is_active,
+			created_at
+		)
+		VALUES ($1, $2, $3, $4, true, NOW())
+		ON CONFLICT (blocker_user_id, blocked_user_id)
+		DO UPDATE SET
+			reason     = EXCLUDED.reason,
+			expires_at = EXCLUDED.expires_at,
+			is_active  = true
+		RETURNING id, created_at
+	`
+	return r.db.QueryRow(
+		query,
+		block.BlockerUserID,
+		block.BlockedUserID,
+		block.Reason,
+		block.ExpiresAt,
+	).Scan(&block.ID, &block.CreatedAt)
+}
+
+func (r *repository) UnblockUser(blockerUserID, blockedUserID string) error {
+	query := `
+		UPDATE user_blocks
+		SET is_active = false
+		WHERE blocker_user_id = $1
+		  AND blocked_user_id = $2
+		  AND is_active = true
+	`
+	_, err := r.db.Exec(query, blockerUserID, blockedUserID)
+	return err
+}
+
+func (r *repository) IsUserBlocked(blockerUserID, blockedUserID string) (bool, error) {
+	query := `
+		SELECT 1
+		FROM user_blocks
+		WHERE blocker_user_id = $1
+		  AND blocked_user_id = $2
+		  AND is_active = true
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		LIMIT 1
+	`
+	var exists int
+	err := r.db.QueryRow(query, blockerUserID, blockedUserID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (r *repository) ListBlockedUsers(blockerUserID string) ([]models.UserBlock, error) {
+	query := `
+		SELECT id, blocker_user_id, blocked_user_id, reason, created_at, expires_at, is_active
+		FROM user_blocks
+		WHERE blocker_user_id = $1
+		  AND is_active = true
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.Query(query, blockerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var blocks []models.UserBlock
+	for rows.Next() {
+		var b models.UserBlock
+		if err := rows.Scan(
+			&b.ID,
+			&b.BlockerUserID,
+			&b.BlockedUserID,
+			&b.Reason,
+			&b.CreatedAt,
+			&b.ExpiresAt,
+			&b.IsActive,
+		); err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, b)
+	}
+	return blocks, rows.Err()
 }
 
 func (r *repository) EnqueueFederationEvent(event *models.FederationEvent) error {

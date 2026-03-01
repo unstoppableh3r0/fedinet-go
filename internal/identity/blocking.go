@@ -1,13 +1,11 @@
 package identity
 
-import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
 
-	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -20,7 +18,6 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		BlockerID string `json:"blocker_id"`
 		BlockedID string `json:"blocked_id"`
 		Reason    string `json:"reason"`
-		Signature string `json:"signature"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -28,33 +25,26 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var blockerPubKey string
-	err := db.QueryRow("SELECT public_key FROM identities WHERE user_id=$1", req.BlockerID).Scan(&blockerPubKey)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			RespondWithError(w, http.StatusNotFound, "blocker identity not found")
-			return
-		}
-		RespondWithError(w, http.StatusInternalServerError, "database error")
+	if req.BlockerID == "" || req.BlockedID == "" {
+		RespondWithError(w, http.StatusBadRequest, "blocker_id and blocked_id are required")
 		return
 	}
 
-	msg := []byte("BLOCK:" + req.BlockerID + ":" + req.BlockedID + ":" + req.Reason)
-
-	valid, err := crypto.VerifySignature(msg, req.Signature, blockerPubKey)
-	if err != nil || !valid {
-		RespondWithError(w, http.StatusUnauthorized, "invalid signature")
+	if req.BlockerID == req.BlockedID {
+		RespondWithError(w, http.StatusBadRequest, "cannot block yourself")
 		return
 	}
 
-	_, err = db.Exec(`
-        INSERT INTO block_events (blocker_id, blocked_id, reason, signature, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
+	internalBlockerID := ToInternalID(req.BlockerID)
+	internalBlockedID := ToInternalID(req.BlockedID)
+
+	_, err := db.Exec(`
+        INSERT INTO block_events (blocker_id, blocked_id, reason, created_at)
+        VALUES ($1, $2, $3, NOW())
         ON CONFLICT (blocker_id, blocked_id) DO UPDATE SET
             reason = $3,
-            signature = $4,
             created_at = NOW()
-    `, req.BlockerID, req.BlockedID, req.Reason, req.Signature)
+    `, internalBlockerID, internalBlockedID, req.Reason)
 
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "failed to record block")
@@ -62,7 +52,7 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := propagateBlock(req.BlockerID, req.BlockedID); err != nil {
-
+		// Log but don't fail the request
 	}
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
@@ -77,7 +67,6 @@ func UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		BlockerID string `json:"blocker_id"`
 		BlockedID string `json:"blocked_id"`
-		Signature string `json:"signature"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -85,22 +74,15 @@ func UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var blockerPubKey string
-	err := db.QueryRow("SELECT public_key FROM identities WHERE user_id=$1", req.BlockerID).Scan(&blockerPubKey)
-	if err != nil {
-		RespondWithError(w, http.StatusNotFound, "blocker not found")
+	if req.BlockerID == "" || req.BlockedID == "" {
+		RespondWithError(w, http.StatusBadRequest, "blocker_id and blocked_id are required")
 		return
 	}
 
-	msg := []byte("UNBLOCK:" + req.BlockerID + ":" + req.BlockedID)
+	internalBlockerID := ToInternalID(req.BlockerID)
+	internalBlockedID := ToInternalID(req.BlockedID)
 
-	valid, err := crypto.VerifySignature(msg, req.Signature, blockerPubKey)
-	if err != nil || !valid {
-		RespondWithError(w, http.StatusUnauthorized, "invalid signature")
-		return
-	}
-
-	_, err = db.Exec(`DELETE FROM block_events WHERE blocker_id=$1 AND blocked_id=$2`, req.BlockerID, req.BlockedID)
+	_, err := db.Exec(`DELETE FROM block_events WHERE blocker_id=$1 AND blocked_id=$2`, internalBlockerID, internalBlockedID)
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "database error")
 		return
@@ -121,11 +103,13 @@ func GetBlocksHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	internalUserID := ToInternalID(userID)
+
 	rows, err := db.Query(`
-        SELECT blocked_id, reason, created_at, signature 
+        SELECT blocked_id, reason, created_at
         FROM block_events 
         WHERE blocker_id = $1
-    `, userID)
+    `, internalUserID)
 	if err != nil {
 		RespondWithError(w, http.StatusInternalServerError, "database error")
 		return
@@ -136,12 +120,16 @@ func GetBlocksHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b models.BlockEvent
 		b.BlockerID = userID
-		if err := rows.Scan(&b.BlockedID, &b.Reason, &b.CreatedAt, &b.Signature); err != nil {
+		if err := rows.Scan(&b.BlockedID, &b.Reason, &b.CreatedAt); err != nil {
 			continue
 		}
+		b.BlockedID = ToExternalID(b.BlockedID)
 		blocks = append(blocks, b)
 	}
 
+	if blocks == nil {
+		blocks = []models.BlockEvent{}
+	}
 	RespondWithJSON(w, http.StatusOK, blocks)
 }
 

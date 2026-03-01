@@ -60,6 +60,24 @@ type BlockEvent struct {
 	Signature string    `json:"signature"`
 }
 
+// UserBlock represents one user blocking another user.
+type UserBlock struct {
+	ID            int64      `json:"id"`
+	BlockerUserID string     `json:"blocker_user_id"`
+	BlockedUserID string     `json:"blocked_user_id"`
+	Reason        string     `json:"reason,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	IsActive      bool       `json:"is_active"`
+}
+
+type BlockUserRequest struct {
+	BlockerUserID string     `json:"blocker_user_id"`
+	BlockedUserID string     `json:"blocked_user_id"`
+	Reason        string     `json:"reason,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
 type Profile struct {
 	UserID              string     `json:"user_id"`
 	DisplayName         string     `json:"display_name"`

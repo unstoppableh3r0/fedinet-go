@@ -65,3 +65,22 @@ CREATE TABLE IF NOT EXISTS blocked_servers (
 
 CREATE INDEX IF NOT EXISTS idx_blocked_servers_url
     ON blocked_servers(server_url);
+
+
+-- USER BLOCKS
+CREATE TABLE IF NOT EXISTS user_blocks (
+    id              BIGSERIAL PRIMARY KEY,
+    blocker_user_id TEXT NOT NULL,
+    blocked_user_id TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    expires_at      TIMESTAMP WITHOUT TIME ZONE,
+    created_at      TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_user_block UNIQUE (blocker_user_id, blocked_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_blocks_blocker
+    ON user_blocks(blocker_user_id);
+
+CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked
+    ON user_blocks(blocked_user_id);

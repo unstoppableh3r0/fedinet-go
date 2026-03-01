@@ -100,6 +100,49 @@ func (s *Service) ResolveReport(
 	return nil
 }
 
+// USER BLOCKING
+
+func (s *Service) BlockUser(
+	blockerUserID string,
+	blockedUserID string,
+	reason string,
+) error {
+	if blockerUserID == "" || blockedUserID == "" {
+		return errors.New("blocker and blocked user IDs are required")
+	}
+	if blockerUserID == blockedUserID {
+		return errors.New("a user cannot block themselves")
+	}
+	block := &models.UserBlock{
+		BlockerUserID: blockerUserID,
+		BlockedUserID: blockedUserID,
+		Reason:        reason,
+		IsActive:      true,
+	}
+	return s.repo.BlockUser(block)
+}
+
+func (s *Service) UnblockUser(
+	blockerUserID string,
+	blockedUserID string,
+) error {
+	if blockerUserID == "" || blockedUserID == "" {
+		return errors.New("blocker and blocked user IDs are required")
+	}
+	return s.repo.UnblockUser(blockerUserID, blockedUserID)
+}
+
+func (s *Service) IsUserBlocked(blockerUserID, blockedUserID string) (bool, error) {
+	return s.repo.IsUserBlocked(blockerUserID, blockedUserID)
+}
+
+func (s *Service) ListBlockedUsers(blockerUserID string) ([]models.UserBlock, error) {
+	if blockerUserID == "" {
+		return nil, errors.New("blocker user ID is required")
+	}
+	return s.repo.ListBlockedUsers(blockerUserID)
+}
+
 // SERVER BLOCKING
 
 func (s *Service) BlockServer(

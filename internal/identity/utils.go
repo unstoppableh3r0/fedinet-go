@@ -24,12 +24,25 @@ func ToExternalID(internalID string) string {
 }
 
 func ToInternalID(externalID string) string {
-	// Just preserve the ID as-is and normalize to lowercase
+	// Normalize to lowercase
 	externalID = strings.ToLower(externalID)
 
-	// If no @ sign, add the server name
+	// If no @ sign, append the internal server identifier
 	if !strings.Contains(externalID, "@") {
 		return externalID + "@" + InternalServerName
+	}
+
+	// If the domain part matches the configured server name (e.g. "server a"),
+	// replace it with the internal server identifier (e.g. "server_a").
+	// This handles the round-trip: ToExternalID produces "alice@Server A",
+	// and ToInternalID must convert that back to "alice@server_a".
+	atIdx := strings.LastIndex(externalID, "@")
+	domain := externalID[atIdx+1:] // already lowercased
+	if config, err := GetServerConfig(); err == nil {
+		configuredName := strings.ToLower(config.ServerName)
+		if domain == configuredName && configuredName != strings.ToLower(InternalServerName) {
+			return externalID[:atIdx+1] + InternalServerName
+		}
 	}
 
 	return externalID

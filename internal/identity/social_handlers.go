@@ -270,6 +270,7 @@ func GetConversationsHandler(w http.ResponseWriter, r *http.Request) {
 	for i := range conversations {
 		conversations[i].Sender = ToExternalID(conversations[i].Sender)
 		conversations[i].Receiver = ToExternalID(conversations[i].Receiver)
+		conversations[i].OtherUser = ToExternalID(conversations[i].OtherUser)
 	}
 
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{

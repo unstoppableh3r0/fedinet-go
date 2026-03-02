@@ -268,6 +268,10 @@ func ApplyMigrations() {
 
 		// Cache table for profile data received from federated (remote) servers.
 		// Keyed by the internal user_id (e.g. alice@server_b).
+		// Federated messaging columns — added after initial messages schema
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_federated BOOLEAN DEFAULT FALSE;`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS origin_server TEXT;`,
+
 		`CREATE TABLE IF NOT EXISTS remote_profiles (
 			user_id       TEXT PRIMARY KEY,
 			display_name  TEXT NOT NULL DEFAULT '',

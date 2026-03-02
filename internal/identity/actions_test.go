@@ -23,7 +23,7 @@ func TestFollowUser(t *testing.T) {
 
 	// 2️⃣ Expect INSERT into follows table
 	mock.ExpectExec("INSERT INTO follows").
-		WithArgs(follower, followee).
+		WithArgs(follower, sqlmock.AnyArg(), followee, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// 3️⃣ Expect LogActivity INSERT
@@ -33,7 +33,7 @@ func TestFollowUser(t *testing.T) {
 
 	// 4️⃣ Expect CreateNotification INSERT
 	mock.ExpectExec("INSERT INTO notifications").
-		WithArgs(followee, follower, "FOLLOW", "").
+		WithArgs(followee, follower, "FOLLOW", followee, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// 5️⃣ Call function

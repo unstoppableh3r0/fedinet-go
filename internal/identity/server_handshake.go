@@ -51,7 +51,7 @@ func InitiateHandshake(serverEndpoint, serverName string) (*HandshakeResponse, e
 	// Send request to remote server
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Post(
-		fmt.Sprintf("%s/api/handshake", serverEndpoint),
+		fmt.Sprintf("%s/federation/handshake", serverEndpoint),
 		"application/json",
 		bytes.NewBuffer(reqJSON),
 	)
@@ -85,7 +85,7 @@ func InitiateHandshake(serverEndpoint, serverName string) (*HandshakeResponse, e
 	}
 
 	ackResp, err := client.Post(
-		fmt.Sprintf("%s/api/handshake/ack", serverEndpoint),
+		fmt.Sprintf("%s/federation/handshake/ack", serverEndpoint),
 		"application/json",
 		bytes.NewBuffer(ackJSON),
 	)

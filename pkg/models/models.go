@@ -135,6 +135,7 @@ type Message struct {
 	ID        string    `json:"id"`
 	Sender    string    `json:"sender"`
 	Receiver  string    `json:"receiver"`
+	OtherUser string    `json:"other_user"` // the conversation partner (computed by GetConversations)
 	Content   string    `json:"content"`
 	ImageURL  *string   `json:"image_url,omitempty"`
 	CreatedAt time.Time `json:"created_at"`

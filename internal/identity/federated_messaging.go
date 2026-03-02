@@ -162,12 +162,21 @@ func HandleIncomingFederatedMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// StoreIncomingFederatedMessage stores a message received from a remote server
+// StoreIncomingFederatedMessage stores a message received from a remote server.
+// fromUserID is the external sender ID (e.g. alice@server_a) — stored as-is since it is cross-server.
+// toUserID is the external recipient ID (e.g. bob@server_b) — resolved to internal ID via DB lookup.
 func StoreIncomingFederatedMessage(fromUserID, toUserID, content, originServer string) error {
+	// Resolve recipient internal user_id: the recipient is on THIS server.
+	// Their user_id in the DB is "username@<InternalServerName>".
+	// toUserID arrives as "username@server_b" (external). ToInternalID handles the conversion.
+	internalTo := ToInternalID(toUserID)
+
+	// Sender is on a REMOTE server. Keep the ID as-is (e.g. "alice@server_a").
+	// This way GetConversationMessages can match using the exact sender string.
 	_, err := db.Exec(`
 		INSERT INTO messages (sender_id, recipient_id, content, created_at, is_federated, origin_server)
 		VALUES ($1, $2, $3, NOW(), TRUE, $4)
-	`, fromUserID, toUserID, content, originServer)
+	`, fromUserID, internalTo, content, originServer)
 
 	return err
 }

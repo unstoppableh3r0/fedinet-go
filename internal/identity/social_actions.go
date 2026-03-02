@@ -230,7 +230,6 @@ func GetConversations(userID string) ([]models.Message, error) {
 	var conversations []models.Message
 	for rows.Next() {
 		var m models.Message
-		err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Content, &m.CreatedAt, &m.OtherUser)
 		err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Content, &m.CreatedAt, &m.ImageURL)
 		if err != nil {
 			log.Printf("Error scanning conversation: %v", err)

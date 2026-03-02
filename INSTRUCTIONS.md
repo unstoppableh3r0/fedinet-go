@@ -42,6 +42,7 @@ chmod +x setup-federation.sh
 | 4 | Runs all 6 identity migrations + federation migrations on both databases |
 | 5 | Restarts identity containers to pick up the new schema |
 | 6 | Calls `POST /initialize` on both servers to create the admin account and generate Ed25519 keys |
+| 7 | Calls `POST /trusted-servers/add` on each server so they mutually trust each other (handshake uses Docker-internal service names) |
 
 The script takes **~1–2 minutes** on the first run (image build). Subsequent runs are faster because layers are cached.
 
@@ -154,6 +155,7 @@ If you stopped with `down -v` (data wiped), run the full script again:
 | `connection refused` after the script finishes | Containers are still starting. Wait 10 seconds and re-run the health check above. |
 | `Server already initialized` on `/initialize` | You already ran the script once with data still in the volume. Either use the existing setup or run `docker-compose -f docker-compose.federation.yml down -v` to start clean. |
 | Container keeps restarting (`Restarting` in `docker ps`) | Check logs: `docker logs server_a_identity`. Most common cause: database not yet ready on a slow machine. |
+| `handshake failed: connection refused` on `/trusted-servers/add` | You passed `http://localhost:8080` as the endpoint. The backend runs inside Docker — `localhost` is the container itself. Use the Docker service name instead: `http://server_a_identity:8082` or `http://server_b_identity:8082`. The setup script does this automatically. |
 | Go code changes not reflected | Always pass `--build`: `docker-compose -f docker-compose.federation.yml up --build -d`. |
 | Need a completely fresh start | `docker-compose -f docker-compose.federation.yml down -v` then `.\setup-federation.bat`. |
 

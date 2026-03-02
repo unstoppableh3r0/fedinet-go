@@ -18,10 +18,10 @@ CREATE TABLE IF NOT EXISTS federation_messages (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_federation_messages_sender ON federation_messages(sender_server);
-CREATE INDEX idx_federation_messages_receiver ON federation_messages(receiver_server);
-CREATE INDEX idx_federation_messages_type ON federation_messages(message_type);
-CREATE INDEX idx_federation_messages_timestamp ON federation_messages(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_federation_messages_sender ON federation_messages(sender_server);
+CREATE INDEX IF NOT EXISTS idx_federation_messages_receiver ON federation_messages(receiver_server);
+CREATE INDEX IF NOT EXISTS idx_federation_messages_type ON federation_messages(message_type);
+CREATE INDEX IF NOT EXISTS idx_federation_messages_timestamp ON federation_messages(timestamp DESC);
 
 -- ============================================================================
 -- User Story 2.3: Secure Delivery with Retries
@@ -40,9 +40,9 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
     CONSTRAINT delivery_attempts_message_attempt UNIQUE(message_id, attempt_number)
 );
 
-CREATE INDEX idx_delivery_attempts_message ON delivery_attempts(message_id);
-CREATE INDEX idx_delivery_attempts_status ON delivery_attempts(status);
-CREATE INDEX idx_delivery_attempts_next_retry ON delivery_attempts(next_retry_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_message ON delivery_attempts(message_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_status ON delivery_attempts(status);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_next_retry ON delivery_attempts(next_retry_at) WHERE status = 'pending';
 
 -- ============================================================================
 -- User Story 2.4: Inbox / Outbox Architecture
@@ -63,10 +63,10 @@ CREATE TABLE IF NOT EXISTS inbox_activities (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_inbox_activities_actor ON inbox_activities(actor_id, actor_server);
-CREATE INDEX idx_inbox_activities_target ON inbox_activities(target_id);
-CREATE INDEX idx_inbox_activities_status ON inbox_activities(status);
-CREATE INDEX idx_inbox_activities_received ON inbox_activities(received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inbox_activities_actor ON inbox_activities(actor_id, actor_server);
+CREATE INDEX IF NOT EXISTS idx_inbox_activities_target ON inbox_activities(target_id);
+CREATE INDEX IF NOT EXISTS idx_inbox_activities_status ON inbox_activities(status);
+CREATE INDEX IF NOT EXISTS idx_inbox_activities_received ON inbox_activities(received_at DESC);
 
 CREATE TABLE IF NOT EXISTS outbox_activities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -83,10 +83,10 @@ CREATE TABLE IF NOT EXISTS outbox_activities (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_outbox_activities_actor ON outbox_activities(actor_id);
-CREATE INDEX idx_outbox_activities_target ON outbox_activities(target_server);
-CREATE INDEX idx_outbox_activities_status ON outbox_activities(delivery_status);
-CREATE INDEX idx_outbox_activities_created ON outbox_activities(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbox_activities_actor ON outbox_activities(actor_id);
+CREATE INDEX IF NOT EXISTS idx_outbox_activities_target ON outbox_activities(target_server);
+CREATE INDEX IF NOT EXISTS idx_outbox_activities_status ON outbox_activities(delivery_status);
+CREATE INDEX IF NOT EXISTS idx_outbox_activities_created ON outbox_activities(created_at DESC);
 
 -- ============================================================================
 -- User Story 2.7: Delivery Acknowledgment
@@ -103,9 +103,9 @@ CREATE TABLE IF NOT EXISTS delivery_acknowledgments (
     CONSTRAINT acknowledgments_message_receiver UNIQUE(message_id, receiver_server)
 );
 
-CREATE INDEX idx_acks_message ON delivery_acknowledgments(message_id);
-CREATE INDEX idx_acks_sender ON delivery_acknowledgments(sender_server);
-CREATE INDEX idx_acks_status ON delivery_acknowledgments(status);
+CREATE INDEX IF NOT EXISTS idx_acks_message ON delivery_acknowledgments(message_id);
+CREATE INDEX IF NOT EXISTS idx_acks_sender ON delivery_acknowledgments(sender_server);
+CREATE INDEX IF NOT EXISTS idx_acks_status ON delivery_acknowledgments(status);
 
 -- ============================================================================
 -- User Story 2.8: Rate Limiting
@@ -125,8 +125,8 @@ CREATE TABLE IF NOT EXISTS rate_limits (
     CONSTRAINT rate_limits_server_endpoint UNIQUE(server_url, endpoint)
 );
 
-CREATE INDEX idx_rate_limits_server ON rate_limits(server_url);
-CREATE INDEX idx_rate_limits_window ON rate_limits(window_started_at);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_server ON rate_limits(server_url);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON rate_limits(window_started_at);
 
 -- ============================================================================
 -- User Story 2.11: Capability Negotiation
@@ -147,8 +147,8 @@ CREATE TABLE IF NOT EXISTS server_capabilities (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_capabilities_server ON server_capabilities(server_url);
-CREATE INDEX idx_capabilities_discovered ON server_capabilities(last_discovered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_capabilities_server ON server_capabilities(server_url);
+CREATE INDEX IF NOT EXISTS idx_capabilities_discovered ON server_capabilities(last_discovered_at DESC);
 
 -- ============================================================================
 -- User Story 2.12: Blocked Server Lists
@@ -166,9 +166,9 @@ CREATE TABLE IF NOT EXISTS blocked_servers (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_blocked_servers_url ON blocked_servers(server_url);
-CREATE INDEX idx_blocked_servers_active ON blocked_servers(is_active) WHERE is_active = true;
-CREATE INDEX idx_blocked_servers_expires ON blocked_servers(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blocked_servers_url ON blocked_servers(server_url);
+CREATE INDEX IF NOT EXISTS idx_blocked_servers_active ON blocked_servers(is_active) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_blocked_servers_expires ON blocked_servers(expires_at) WHERE expires_at IS NOT NULL;
 
 -- ============================================================================
 -- User Story 2.13: Soft / Hard Federation Modes

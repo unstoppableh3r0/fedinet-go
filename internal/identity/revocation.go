@@ -1,13 +1,14 @@
 package identity
 
-import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/google/uuid"
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 func RevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -112,13 +113,17 @@ func propagateRevocation(identityID uuid.UUID, keyID, reason, signature string) 
 		return
 	}
 
+	localServerURL := os.Getenv("SERVER_URL")
+	if localServerURL == "" {
+		localServerURL = "http://localhost:8080"
+	}
 	rows, err := db.Query(`
         SELECT DISTINCT follower_home_server 
         FROM follows 
         WHERE followee_user_id = $1 
-        AND follower_home_server != 'http://localhost:8080'
+        AND follower_home_server != $2
         AND follower_home_server != ''
-    `, userID)
+    `, userID, localServerURL)
 	if err != nil {
 		return
 	}

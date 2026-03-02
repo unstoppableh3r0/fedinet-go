@@ -54,6 +54,16 @@ if [ -f "internal/identity/migrations/004_session_keys.sql" ]; then
   run_migration "internal/identity/migrations/004_session_keys.sql" "fedinet_server_b"
 fi
 
+if [ -f "internal/identity/migrations/005_federated_messages.sql" ]; then
+  run_migration "internal/identity/migrations/005_federated_messages.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/005_federated_messages.sql" "fedinet_server_b"
+fi
+
+if [ -f "internal/identity/migrations/006_fix_messages_schema.sql" ]; then
+  run_migration "internal/identity/migrations/006_fix_messages_schema.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/006_fix_messages_schema.sql" "fedinet_server_b"
+fi
+
 echo "  - Restarting Identity Services to pick up schema..."
 docker restart server_a_identity server_b_identity
 sleep 5

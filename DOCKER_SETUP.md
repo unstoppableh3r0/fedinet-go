@@ -100,20 +100,36 @@ docker exec fedinet_postgres pg_isready -U postgres
 Both **identity** and **federation** schemas need to be applied to both databases:
 
 ```powershell
-# Identity migrations (server initialization tables)
+# 001 — Server identity, admins, invites tables
 Get-Content .\internal\identity\migrations\001_server_initialization.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\identity\migrations\001_server_initialization.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 
-# Core identity schema (users, profiles, posts, etc.)
+# 002 — Core schema (identities, profiles, posts, follows, messages, etc.)
 Get-Content .\internal\identity\migrations\002_core_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\identity\migrations\002_core_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 
-# Federation migrations
+# 003 — Registration sessions
+Get-Content .\internal\identity\migrations\003_registration_sessions.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\003_registration_sessions.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 004 — Session keys
+Get-Content .\internal\identity\migrations\004_session_keys.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\004_session_keys.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 005 — Federated messages
+Get-Content .\internal\identity\migrations\005_federated_messages.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\005_federated_messages.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 006 — Fix messages schema
+Get-Content .\internal\identity\migrations\006_fix_messages_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\006_fix_messages_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# Federation tables
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 ```
 
-> **Note:** You may see `NOTICE: relation already exists` messages — that's fine.
+> **Note:** You may see `NOTICE: relation already exists` messages — that's fine. The `setup-federation.bat` / `setup-federation.sh` scripts run all of the above automatically.
 
 ### Step 5: Restart Identity Containers
 
@@ -317,12 +333,14 @@ Invoke-RestMethod -Uri "http://localhost:9081/federation/discover" -Method Post 
 
 Queue an activity from Server A to be delivered to Server B:
 
+> **User ID format:** After `/initialize` is called with `server_name: "Server A"` / `"Server B"`, the `SERVER_ID` env vars (`server_a` / `server_b`) are used as the domain suffix in all user IDs. Users registered on Server A have IDs `username@server_a`; users on Server B have IDs `username@server_b`. Using `@localhost` only works when `SERVER_ID` is unset (no Docker).
+
 ```powershell
 Invoke-RestMethod -Uri "http://localhost:8081/federation/send" -Method Post -Body '{
     "activity_type": "Follow",
-    "actor_id": "bob@localhost",
+    "actor_id": "bob@server_a",
     "target_server": "http://server-b-federation:8081",
-    "target_id": "alice@localhost",
+    "target_id": "alice@server_b",
     "payload": {"message": "Bob wants to follow Alice"}
 }' -ContentType "application/json"
 ```
@@ -398,4 +416,8 @@ docker exec -it fedinet_postgres psql -U postgres -d fedinet_server_a
 | `internal/federation/Dockerfile` | Builds the federation service image |
 | `internal/identity/migrations/001_server_initialization.sql` | Server identity, admins, invites tables |
 | `internal/identity/migrations/002_core_schema.sql` | Core tables: identities, profiles, posts, follows, etc. |
+| `internal/identity/migrations/003_registration_sessions.sql` | Registration session tracking |
+| `internal/identity/migrations/004_session_keys.sql` | Session key rotation |
+| `internal/identity/migrations/005_federated_messages.sql` | Cross-server message delivery tables |
+| `internal/identity/migrations/006_fix_messages_schema.sql` | Schema fixes for federated messages |
 | `internal/federation/migrations.sql` | Federation-specific tables |

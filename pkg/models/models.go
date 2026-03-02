@@ -136,6 +136,7 @@ type Message struct {
 	Sender    string    `json:"sender"`
 	Receiver  string    `json:"receiver"`
 	Content   string    `json:"content"`
+	ImageURL  *string   `json:"image_url,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -198,8 +199,9 @@ type Post struct {
 	HasLiked    bool `json:"has_liked"`
 	HasReposted bool `json:"has_reposted"`
 
-	IsEdited   bool `json:"is_edited"`
-	VersionNum int  `json:"version_num"`
+	IsEdited   bool    `json:"is_edited"`
+	VersionNum int     `json:"version_num"`
+	ImageURL   *string `json:"image_url,omitempty"`
 }
 
 type PostVersion struct {

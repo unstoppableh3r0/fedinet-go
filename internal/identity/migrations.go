@@ -262,6 +262,10 @@ func ApplyMigrations() {
 		// ActivityStreams 2.0 payload column (added after initial schema)
 		`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS activity_stream JSONB;`,
 
+		// Image URL support for posts and messages
+		`ALTER TABLE posts ADD COLUMN IF NOT EXISTS image_url TEXT;`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS image_url TEXT;`,
+
 		// Cache table for profile data received from federated (remote) servers.
 		// Keyed by the internal user_id (e.g. alice@server_b).
 		`CREATE TABLE IF NOT EXISTS remote_profiles (

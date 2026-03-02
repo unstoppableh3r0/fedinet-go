@@ -27,10 +27,30 @@
 
 ### Option A — Single server (quickest start)
 
+`docker-compose.yml` only starts **Postgres**. The identity service is run separately as a local Go binary (useful for fast iteration without rebuilding Docker images).
+
 ```bash
-# From the workspace root
+# Terminal 1 — start Postgres
 cd fedinet-go
-docker-compose up --build
+docker-compose up -d
+
+# Terminal 2 — run the identity service locally (requires Go 1.25+)
+export SERVER_ID=server_a
+export SERVER_URL=http://localhost:8080
+export DATABASE_URL=postgres://postgres:postgres@localhost:5432/fedinet_server_a?sslmode=disable
+export JWT_SECRET=dev-secret
+export SERVER_IDENTITY_PRIVATE_KEY=c4b1e5a2f3d6c9b8e1a4d7f0c3b6a9e2d5f8c1b4e7a0d3f6c9b2e5a8d1f4c7b0a3d6e9c2f5b8a1d4e7c0b3f6a9d2e5c8b1f4a7d0e3c6b9a2d5f8e1c4b7a0d3f6
+go run ./cmd/identity/
+```
+
+On Windows PowerShell:
+```powershell
+$env:SERVER_ID   = "server_a"
+$env:SERVER_URL  = "http://localhost:8080"
+$env:DATABASE_URL = "postgres://postgres:postgres@localhost:5432/fedinet_server_a?sslmode=disable"
+$env:JWT_SECRET  = "dev-secret"
+$env:SERVER_IDENTITY_PRIVATE_KEY = "c4b1e5a2f3d6c9b8e1a4d7f0c3b6a9e2d5f8c1b4e7a0d3f6c9b2e5a8d1f4c7b0a3d6e9c2f5b8a1d4e7c0b3f6a9d2e5c8b1f4a7d0e3c6b9a2d5f8e1c4b7a0d3f6"
+go run ./cmd/identity/
 ```
 
 What starts:
@@ -38,6 +58,8 @@ What starts:
 |---------|-----|
 | Server A identity API | http://localhost:8080 |
 | PostgreSQL | localhost:5432 |
+
+> First run: you must create the `fedinet_server_a` database and apply migrations manually, or just use **Option B** (the setup script does all of this automatically).
 
 ---
 
@@ -136,26 +158,38 @@ docker-compose -f docker-compose.federation.yml down -v
 
 ## Running without Docker (Go directly)
 
-If you have Go 1.21+ and a local Postgres instance, you can run the server directly:
+If you have **Go 1.25+** and a local Postgres instance, you can run the server directly:
+
+> **Database name:** Use `fedinet_server_a` (not `fedinet_timeline`). The `fedinet_timeline` name is only referenced by the legacy `docker-compose.yml` postgres service; all identity & federation code uses `fedinet_server_a` / `fedinet_server_b`.
 
 ```bash
 cd fedinet-go
 
 # Export required env vars (adjust values as needed)
-export DATABASE_URL="postgres://postgres:postgres@localhost:5432/fedinet_timeline?sslmode=disable"
+export DATABASE_URL="postgres://postgres:postgres@localhost:5432/fedinet_server_a?sslmode=disable"
 export JWT_SECRET="dev-secret"
-export PORT=8080
+export SERVER_ID="server_a"
+export SERVER_URL="http://localhost:8080"
+export SERVER_IDENTITY_PRIVATE_KEY="c4b1e5a2f3d6c9b8e1a4d7f0c3b6a9e2d5f8c1b4e7a0d3f6c9b2e5a8d1f4c7b0a3d6e9c2f5b8a1d4e7c0b3f6a9d2e5c8b1f4a7d0e3c6b9a2d5f8e1c4b7a0d3f6"
+# Optional: enable cross-server search (format: "peer_id=http://host:port")
+export FEDERATION_PEERS="server_b=http://localhost:9080"
 
-go run ./cmd/identity/...
+go run ./cmd/identity/
 ```
 
 On Windows PowerShell:
 ```powershell
-$env:DATABASE_URL = "postgres://postgres:postgres@localhost:5432/fedinet_timeline?sslmode=disable"
-$env:JWT_SECRET   = "dev-secret"
-$env:PORT         = "8080"
-go run ./cmd/identity/...
+$env:DATABASE_URL                = "postgres://postgres:postgres@localhost:5432/fedinet_server_a?sslmode=disable"
+$env:JWT_SECRET                  = "dev-secret"
+$env:SERVER_ID                   = "server_a"
+$env:SERVER_URL                  = "http://localhost:8080"
+$env:SERVER_IDENTITY_PRIVATE_KEY = "c4b1e5a2f3d6c9b8e1a4d7f0c3b6a9e2d5f8c1b4e7a0d3f6c9b2e5a8d1f4c7b0a3d6e9c2f5b8a1d4e7c0b3f6a9d2e5c8b1f4a7d0e3c6b9a2d5f8e1c4b7a0d3f6"
+# Optional: enable cross-server search
+$env:FEDERATION_PEERS            = "server_b=http://localhost:9080"
+go run ./cmd/identity/
 ```
+
+> `FEDERATION_PEERS` is **required** for cross-server search (`/search?q=alice@server_b`) and federated follow/message delivery to work. Without it, those calls return `"discovery_status": "not_found"`. In Docker the compose file injects this automatically.
 
 ---
 

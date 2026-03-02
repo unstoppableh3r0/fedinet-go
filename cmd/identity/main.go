@@ -186,6 +186,10 @@ func main() {
 	mux.Handle("/admin/trusted-servers/remove", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RemoveTrustedServerHandler)))
 	mux.Handle("/admin/trusted-servers/test", identity.AdminAuthMiddleware(http.HandlerFunc(identity.TestTrustedServerConnectionHandler)))
 
+	// Image uploads
+	mux.HandleFunc("/upload/image", identity.UploadImageHandler)
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
+
 	handler := corsMiddleware(mux)
 
 	log.Println("✅ Identity service listening on :8082")

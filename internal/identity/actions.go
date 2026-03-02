@@ -78,14 +78,14 @@ func UnfollowUser(followerID, followeeID string) error {
 	return nil
 }
 
-func SendMessage(senderID, recipientID, content string) error {
+func SendMessage(senderID, recipientID, content string, imageURL *string) error {
 	var messageID string
 
 	err := db.QueryRow(
-		`INSERT INTO messages (sender_id, recipient_id, content)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO messages (sender_id, recipient_id, content, image_url)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING id`,
-		senderID, recipientID, content,
+		senderID, recipientID, content, imageURL,
 	).Scan(&messageID)
 
 	if err != nil {
@@ -379,13 +379,17 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 	return nil
 }
 
-func CreatePost(userID, content string) (string, error) {
+func CreatePost(userID, content string, imageURL *string) (string, error) {
+	// Allow image-only posts by using a space sentinel when content is empty
+	if content == "" {
+		content = " "
+	}
 	var postID string
 	err := db.QueryRow(`
-		INSERT INTO posts (author, content, created_at, updated_at)
-		VALUES ($1, $2, NOW(), NOW())
+		INSERT INTO posts (author, content, image_url, created_at, updated_at)
+		VALUES ($1, $2, $3, NOW(), NOW())
 		RETURNING id
-	`, userID, content).Scan(&postID)
+	`, userID, content, imageURL).Scan(&postID)
 
 	if err != nil {
 		return "", err
@@ -557,7 +561,8 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
 			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
 			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) as has_liked,
-			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted
+			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted,
+			p.image_url
 		FROM posts p
 		WHERE p.author = $1
 		ORDER BY p.created_at DESC
@@ -576,7 +581,7 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 		err := rows.Scan(
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
-			&p.HasLiked, &p.HasReposted,
+			&p.HasLiked, &p.HasReposted, &p.ImageURL,
 		)
 		if err != nil {
 			return nil, err
@@ -603,7 +608,8 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
 			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
 			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
-			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted
+			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
+			p.image_url
 		FROM posts p
 		ORDER BY p.created_at DESC
 		LIMIT $2
@@ -621,7 +627,7 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 		err := rows.Scan(
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
-			&p.HasLiked, &p.HasReposted,
+			&p.HasLiked, &p.HasReposted, &p.ImageURL,
 		)
 		if err != nil {
 			return nil, err

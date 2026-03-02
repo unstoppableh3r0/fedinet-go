@@ -49,9 +49,10 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		From    string `json:"from"`
-		To      string `json:"to"`
-		Content string `json:"content"`
+		From     string  `json:"from"`
+		To       string  `json:"to"`
+		Content  string  `json:"content"`
+		ImageURL *string `json:"image_url"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -59,7 +60,7 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.From == "" || req.To == "" || req.Content == "" {
+	if req.From == "" || req.To == "" || (req.Content == "" && req.ImageURL == nil) {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
 		return
 	}
@@ -92,7 +93,7 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Local message - use existing logic
-	if err := SendMessage(ToInternalID(req.From), ToInternalID(req.To), req.Content); err != nil {
+	if err := SendMessage(ToInternalID(req.From), ToInternalID(req.To), req.Content, req.ImageURL); err != nil {
 		RespondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

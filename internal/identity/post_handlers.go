@@ -80,20 +80,21 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID  string `json:"user_id"`
-		Content string `json:"content"`
+		UserID   string  `json:"user_id"`
+		Content  string  `json:"content"`
+		ImageURL *string `json:"image_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if req.UserID == "" || req.Content == "" {
+	if req.UserID == "" || (req.Content == "" && req.ImageURL == nil) {
 		RespondWithError(w, http.StatusBadRequest, "missing user_id or content")
 		return
 	}
 
 	internalUserID := ToInternalID(req.UserID)
-	postID, err := CreatePost(internalUserID, req.Content)
+	postID, err := CreatePost(internalUserID, req.Content, req.ImageURL)
 	if err != nil {
 		log.Printf("CreatePost error for user %s: %v", internalUserID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to create post")

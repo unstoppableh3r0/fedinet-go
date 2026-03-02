@@ -19,7 +19,8 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 			COALESCE(COUNT(DISTINCT r.id), 0) as reply_count,
 			COALESCE(COUNT(DISTINCT rp.user_id), 0) as repost_count,
 			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
-			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted
+			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
+			p.image_url
 		FROM posts p
 		LEFT JOIN likes l ON p.id = l.post_id
 		LEFT JOIN replies r ON p.id = r.post_id
@@ -27,7 +28,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 		WHERE p.author IN (
 			SELECT followee_user_id FROM follows WHERE follower_user_id = $1
 		) OR p.author = $1
-		GROUP BY p.id, p.author, p.content, p.created_at, p.updated_at
+		GROUP BY p.id, p.author, p.content, p.created_at, p.updated_at, p.image_url
 		ORDER BY p.created_at DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -44,7 +45,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 		err := rows.Scan(
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
-			&p.HasLiked, &p.HasReposted,
+			&p.HasLiked, &p.HasReposted, &p.ImageURL,
 		)
 		if err != nil {
 			log.Printf("Error scanning post: %v", err)
@@ -201,7 +202,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 					ELSE recipient_id || '-' || sender_id
 				END
 			)
-			id, sender_id, recipient_id, content, created_at
+			id, sender_id, recipient_id, content, created_at, image_url
 			FROM messages
 			WHERE sender_id = $1 OR recipient_id = $1
 			ORDER BY 
@@ -211,7 +212,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 				END,
 				created_at DESC
 		)
-		SELECT id, sender_id, recipient_id, content, created_at
+		SELECT id, sender_id, recipient_id, content, created_at, image_url
 		FROM latest_messages
 		ORDER BY created_at DESC
 		LIMIT 50
@@ -226,7 +227,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 	var conversations []models.Message
 	for rows.Next() {
 		var m models.Message
-		err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Content, &m.CreatedAt)
+		err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Content, &m.CreatedAt, &m.ImageURL)
 		if err != nil {
 			log.Printf("Error scanning conversation: %v", err)
 			continue
@@ -239,7 +240,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 
 func GetConversationMessages(userID, otherUserID string) ([]models.Message, error) {
 	query := `
-		SELECT id, sender_id, recipient_id, content, created_at
+		SELECT id, sender_id, recipient_id, content, created_at, image_url
 		FROM messages
 		WHERE (sender_id = $1 AND recipient_id = $2)
 		   OR (sender_id = $2 AND recipient_id = $1)
@@ -256,7 +257,7 @@ func GetConversationMessages(userID, otherUserID string) ([]models.Message, erro
 	var messages []models.Message
 	for rows.Next() {
 		var m models.Message
-		err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Content, &m.CreatedAt)
+		err := rows.Scan(&m.ID, &m.Sender, &m.Receiver, &m.Content, &m.CreatedAt, &m.ImageURL)
 		if err != nil {
 			log.Printf("Error scanning message: %v", err)
 			continue

@@ -50,3 +50,6 @@ frontend/
 *.postman_collection.json
 *.postman_test_run.json
 Fedinet-Go API*.json
+
+# Postman exports
+*postman*.json

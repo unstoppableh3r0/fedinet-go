@@ -45,3 +45,8 @@ frontend_test_report.txt
 
 # Local frontend copy (if not part of backend repo)
 frontend/
+
+# Postman exports
+*.postman_collection.json
+*.postman_test_run.json
+Fedinet-Go API*.json

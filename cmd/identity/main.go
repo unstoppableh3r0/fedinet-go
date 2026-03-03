@@ -101,6 +101,7 @@ func main() {
 
 	// Users
 	mux.HandleFunc("/user/me", identity.MeHandler)
+	mux.HandleFunc("/profile/update", identity.UpdateProfileHandler)
 	mux.HandleFunc("/user/search", identity.UserSearchHandler) // local user lookup
 	mux.HandleFunc("/users/suggested", identity.GetSuggestedUsersHandler)
 

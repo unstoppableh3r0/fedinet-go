@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 func FollowHandler(w http.ResponseWriter, r *http.Request) {
@@ -283,4 +285,33 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
 	})
+}
+
+// UpdateProfileHandler handles POST /profile/update
+// Body: models.UpdateProfileRequest (user_id required; all other fields optional)
+func UpdateProfileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req models.UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.UserID == "" {
+		RespondWithError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+
+	req.UserID = ToInternalID(req.UserID)
+
+	if err := UpdateProfile(req); err != nil {
+		log.Printf("UpdateProfileHandler error for user %s: %v", req.UserID, err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to update profile")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "profile updated"})
 }

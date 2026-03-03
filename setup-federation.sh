@@ -15,11 +15,11 @@ echo "============================================"
 echo ""
 
 # Step 1: Start all containers
-echo "[1/4] Starting Docker containers..."
+echo "[1/5] Starting Docker containers..."
 docker-compose -f docker-compose.federation.yml up --build -d
 
 # Step 2: Wait for Postgres to be healthy
-echo "[2/4] Waiting for Postgres to be ready..."
+echo "[2/5] Waiting for Postgres to be ready..."
 # Loop until pg_isready returns 0
 until docker exec fedinet_postgres pg_isready -U postgres > /dev/null 2>&1; do
   echo "  Waiting for Postgres..."
@@ -28,7 +28,7 @@ done
 echo "  Postgres is ready."
 
 # Step 3: Run migrations on both databases
-echo "[3/4] Running migrations..."
+echo "[3/5] Running migrations..."
 
 run_migration() {
   local file=$1
@@ -77,7 +77,7 @@ cat internal/federation/migrations.sql | docker exec -i fedinet_postgres psql -U
 
 
 # Step 4: Initialize both servers
-echo "[4/4] Initializing servers..."
+echo "[4/5] Initializing servers..."
 
 echo "  - Initializing Server A (port 8080)..."
 curl -s -X POST http://localhost:8080/initialize \
@@ -89,6 +89,23 @@ echo "  - Initializing Server B (port 9080)..."
 curl -s -X POST http://localhost:9080/initialize \
   -H "Content-Type: application/json" \
   -d '{"server_name": "Server B", "admin_username": "admin", "admin_password": "password123"}'
+echo ""
+
+# Step 5: Establish mutual federation trust
+# The endpoint MUST be the Docker-internal service name:port, NOT localhost.
+# The Go backend runs inside a container — localhost would resolve to the container itself.
+echo "[5/5] Establishing mutual federation trust..."
+
+echo "  - Server A trusting Server B..."
+curl -s -X POST http://localhost:8080/trusted-servers/add \
+  -H "Content-Type: application/json" \
+  -d '{"server_id": "server_b", "server_name": "Server B", "endpoint": "http://server_b_identity:8082"}'
+echo ""
+
+echo "  - Server B trusting Server A..."
+curl -s -X POST http://localhost:9080/trusted-servers/add \
+  -H "Content-Type: application/json" \
+  -d '{"server_id": "server_a", "server_name": "Server A", "endpoint": "http://server_a_identity:8082"}'
 echo ""
 
 echo ""

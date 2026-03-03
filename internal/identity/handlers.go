@@ -146,6 +146,14 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Respect search_local privacy setting
+	if privSettings, privErr := GetPrivacySettings(internalUserID); privErr == nil {
+		if privSettings.SearchLocal == "hidden" {
+			RespondWithError(w, http.StatusForbidden, "profile unavailable")
+			return
+		}
+	}
+
 	profile, err := GetProfileByUserID(internalUserID)
 	if err != nil {
 		log.Printf("GetProfileByUserID error for user %s: %v", internalUserID, err)

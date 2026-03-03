@@ -283,6 +283,51 @@ func ApplyMigrations() {
 			version       INT  NOT NULL DEFAULT 0,
 			updated_at    TIMESTAMP DEFAULT NOW()
 		);`,
+
+		// Admin dashboard growth-trend snapshots.
+		// Stored in Postgres so data is scoped to the Docker volume and is
+		// automatically removed when `docker-compose down -v` wipes postgres_data.
+		`CREATE TABLE IF NOT EXISTS admin_snapshots (
+			id         BIGSERIAL PRIMARY KEY,
+			ts         BIGINT    NOT NULL,
+			users      INT       NOT NULL DEFAULT 0,
+			posts      INT       NOT NULL DEFAULT 0,
+			activities INT       NOT NULL DEFAULT 0,
+			follows    INT       NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_snapshots_ts ON admin_snapshots(ts);`,
+
+		// Account linking — direct, non-transitive identity graph.
+		// A<->B and B<->C does NOT imply A<->C.
+		// Only the requester (account that created the link) may remove it.
+		`CREATE TABLE IF NOT EXISTS account_links (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			requester_id TEXT NOT NULL,
+			target_id    TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'pending',
+			created_at   TIMESTAMP DEFAULT NOW(),
+			updated_at   TIMESTAMP DEFAULT NOW(),
+			UNIQUE(requester_id, target_id),
+			FOREIGN KEY (requester_id) REFERENCES identities(user_id) ON DELETE CASCADE,
+			FOREIGN KEY (target_id)    REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_account_links_requester ON account_links(requester_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_account_links_target    ON account_links(target_id);`,
+
+		// Per-user privacy settings — search visibility and activity visibility controls.
+		`CREATE TABLE IF NOT EXISTS privacy_settings (
+			user_id                  TEXT PRIMARY KEY,
+			search_local             TEXT NOT NULL DEFAULT 'everyone',
+			search_federated         TEXT NOT NULL DEFAULT 'everyone',
+			posts_visibility         TEXT NOT NULL DEFAULT 'public',
+			likes_visibility         TEXT NOT NULL DEFAULT 'public',
+			replies_visibility       TEXT NOT NULL DEFAULT 'public',
+			following_list_visibility TEXT NOT NULL DEFAULT 'public',
+			followers_list_visibility TEXT NOT NULL DEFAULT 'public',
+			created_at               TIMESTAMP DEFAULT NOW(),
+			updated_at               TIMESTAMP DEFAULT NOW(),
+			FOREIGN KEY (user_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
 	}
 
 	for _, schema := range schemas {

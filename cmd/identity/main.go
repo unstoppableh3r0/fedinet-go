@@ -51,6 +51,9 @@ func main() {
 	// Inject database into identity package
 	identity.SetDB(database)
 
+	// Connect to Redis for notification storage
+	identity.InitRedis()
+
 	// Run migrations
 	identity.ApplyMigrations()
 
@@ -120,6 +123,14 @@ func main() {
 	mux.HandleFunc("/unblock", identity.UnblockUserHandler)
 	mux.HandleFunc("/blocks", identity.GetBlocksHandler)
 
+	// Account linking (direct, non-transitive identity graph)
+	mux.HandleFunc("/account/link/request", identity.RequestAccountLinkHandler)
+	mux.HandleFunc("/account/link/accept", identity.AcceptAccountLinkHandler)
+	mux.HandleFunc("/account/link/reject", identity.RejectAccountLinkHandler)
+	mux.HandleFunc("/account/link/remove", identity.RemoveAccountLinkHandler)
+	mux.HandleFunc("/account/link/switch", identity.SwitchLinkedAccountHandler)
+	mux.HandleFunc("/account/links", identity.GetAccountLinksHandler)
+
 	// Keys & revocations
 	mux.HandleFunc("/revoke-key", identity.RevokeKeyHandler)
 	mux.HandleFunc("/revocations", identity.GetRevocationsHandler)
@@ -186,6 +197,21 @@ func main() {
 	mux.Handle("/admin/trusted-servers/add", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AddTrustedServerHandler)))
 	mux.Handle("/admin/trusted-servers/remove", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RemoveTrustedServerHandler)))
 	mux.Handle("/admin/trusted-servers/test", identity.AdminAuthMiddleware(http.HandlerFunc(identity.TestTrustedServerConnectionHandler)))
+
+	// Admin dashboard growth-trend snapshots (persisted in Postgres, cleared with Docker volumes)
+	mux.Handle("/admin/snapshots", identity.AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			identity.SaveAdminSnapshotHandler(w, r)
+		} else {
+			identity.GetAdminSnapshotsHandler(w, r)
+		}
+	})))
+
+	// Admin account-link graph (view any user's or all-server links)
+	mux.Handle("/admin/account/links", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AdminGetAccountLinksHandler)))
+
+	// Privacy settings
+	mux.HandleFunc("/privacy/settings", identity.PrivacySettingsHandler)
 
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)

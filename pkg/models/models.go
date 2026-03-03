@@ -154,6 +154,22 @@ type UpdateProfileRequest struct {
 	FollowingVisibility *string `json:"following_visibility,omitempty"`
 }
 
+// PrivacySettings stores per-user visibility and discoverability preferences.
+type PrivacySettings struct {
+	UserID string `json:"user_id"`
+	// Search discoverability
+	SearchLocal     string `json:"search_local"`     // 'everyone' | 'hidden'
+	SearchFederated string `json:"search_federated"` // 'everyone' | 'hidden'
+	// Activity visibility (who can see what without following)
+	PostsVisibility         string    `json:"posts_visibility"`          // 'public' | 'followers' | 'private'
+	LikesVisibility         string    `json:"likes_visibility"`          // 'public' | 'followers' | 'private'
+	RepliesVisibility       string    `json:"replies_visibility"`        // 'public' | 'followers' | 'private'
+	FollowingListVisibility string    `json:"following_list_visibility"` // 'public' | 'followers' | 'private'
+	FollowersListVisibility string    `json:"followers_list_visibility"` // 'public' | 'followers' | 'private'
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
+}
+
 type PrivacyAuditLog struct {
 	ID            string    `json:"id" db:"id"`
 	ActorID       string    `json:"actor_id" db:"actor_id"`

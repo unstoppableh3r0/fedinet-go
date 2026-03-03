@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -377,4 +378,185 @@ func GetInviteQRHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.WriteHeader(http.StatusOK)
 	w.Write(png)
+}
+
+// AdminSnapshot is a single growth-trend data point persisted in Postgres.
+type AdminSnapshot struct {
+	TS         int64 `json:"ts"`
+	Users      int   `json:"users"`
+	Posts      int   `json:"posts"`
+	Activities int   `json:"activities"`
+	Follows    int   `json:"follows"`
+}
+
+const maxAdminSnapshots = 60
+
+// GetAdminSnapshotsHandler returns the stored admin dashboard trend snapshots.
+//
+//	GET /admin/snapshots
+func GetAdminSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT ts, users, posts, activities, follows
+		FROM admin_snapshots
+		ORDER BY ts ASC
+		LIMIT $1
+	`, maxAdminSnapshots)
+	if err != nil {
+		log.Printf("GetAdminSnapshotsHandler: query error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch snapshots")
+		return
+	}
+	defer rows.Close()
+
+	snaps := []AdminSnapshot{}
+	for rows.Next() {
+		var s AdminSnapshot
+		if err := rows.Scan(&s.TS, &s.Users, &s.Posts, &s.Activities, &s.Follows); err != nil {
+			continue
+		}
+		snaps = append(snaps, s)
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{"snapshots": snaps})
+}
+
+// SaveAdminSnapshotHandler upserts a single snapshot into the DB.
+// If a snapshot taken within the last 5 minutes already exists it is updated in place;
+// otherwise a new row is appended. Rows beyond maxAdminSnapshots are pruned.
+//
+//	POST /admin/snapshots
+func SaveAdminSnapshotHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var snap AdminSnapshot
+	if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if snap.TS == 0 {
+		RespondWithError(w, http.StatusBadRequest, "ts is required")
+		return
+	}
+
+	fiveMinMs := int64(5 * 60 * 1000)
+	// Check for a recent snapshot we should update instead of inserting
+	var existingID int64
+	err := db.QueryRow(`
+		SELECT id FROM admin_snapshots
+		WHERE $1 - ts < $2
+		ORDER BY ts DESC LIMIT 1
+	`, snap.TS, fiveMinMs).Scan(&existingID)
+
+	if err == nil {
+		// Update the recent snapshot
+		_, err = db.Exec(`
+			UPDATE admin_snapshots
+			SET ts=$1, users=$2, posts=$3, activities=$4, follows=$5
+			WHERE id=$6
+		`, snap.TS, snap.Users, snap.Posts, snap.Activities, snap.Follows, existingID)
+	} else {
+		// Insert a new row
+		_, err = db.Exec(`
+			INSERT INTO admin_snapshots (ts, users, posts, activities, follows)
+			VALUES ($1, $2, $3, $4, $5)
+		`, snap.TS, snap.Users, snap.Posts, snap.Activities, snap.Follows)
+	}
+
+	if err != nil {
+		log.Printf("SaveAdminSnapshotHandler: write error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to save snapshot")
+		return
+	}
+
+	// Prune oldest rows if we exceed the cap
+	db.Exec(`
+		DELETE FROM admin_snapshots
+		WHERE id NOT IN (
+			SELECT id FROM admin_snapshots ORDER BY ts DESC LIMIT $1
+		)
+	`, maxAdminSnapshots)
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ── Admin: account link graph ─────────────────────────────────────
+
+// GET /admin/account/links?user_id=alice@server_a
+// Returns the full link graph for a given user_id (admin-only).
+// If user_id is omitted, returns ALL account links on the server.
+func AdminGetAccountLinksHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	rawUserID := r.URL.Query().Get("user_id")
+
+	var rows *sql.Rows
+	var err error
+
+	if rawUserID == "" {
+		rows, err = db.Query(`
+			SELECT id, requester_id, target_id, status, created_at, updated_at
+			FROM account_links
+			ORDER BY updated_at DESC
+		`)
+	} else {
+		userID := ToInternalID(rawUserID)
+		rows, err = db.Query(`
+			SELECT id, requester_id, target_id, status, created_at, updated_at
+			FROM account_links
+			WHERE requester_id=$1 OR target_id=$1
+			ORDER BY updated_at DESC
+		`, userID)
+	}
+	if err != nil {
+		log.Printf("AdminGetAccountLinks: query error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to query links")
+		return
+	}
+	defer rows.Close()
+
+	type linkRow struct {
+		ID          string `json:"id"`
+		RequesterID string `json:"requester_id"`
+		TargetID    string `json:"target_id"`
+		Status      string `json:"status"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
+	}
+	var links []linkRow
+
+	for rows.Next() {
+		var l AccountLink
+		if err := rows.Scan(&l.ID, &l.RequesterID, &l.TargetID, &l.Status, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			continue
+		}
+		links = append(links, linkRow{
+			ID:          l.ID,
+			RequesterID: ToExternalID(l.RequesterID),
+			TargetID:    ToExternalID(l.TargetID),
+			Status:      l.Status,
+			CreatedAt:   l.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:   l.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	if links == nil {
+		links = []linkRow{}
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"user_id": rawUserID,
+		"links":   links,
+		"count":   len(links),
+	})
 }

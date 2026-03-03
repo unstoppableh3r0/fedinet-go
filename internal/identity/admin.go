@@ -166,41 +166,33 @@ func UpdateServerName(newName, updatedBy string) error {
 		return fmt.Errorf("failed to update server config: %v", err)
 	}
 
-	err = NotifyAllUsersInTx(tx, "Server Name Updated",
-		fmt.Sprintf("The server name has been changed to: %s. Your username is now username@%s", newName, newName),
-		"server_change")
-
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	// Fan out the notification asynchronously via Redis after the DB commit.
+	go func() {
+		msg := fmt.Sprintf("The server name has been changed to: %s. Your username is now username@%s", newName, newName)
+		if err := NotifyAllUsers("SERVER_UPDATE", msg); err != nil {
+			log.Printf("UpdateServerName: Redis fanout error: %v", err)
+		}
+	}()
+
+	return nil
 }
 
-func NotifyAllUsers(title, message, notifType string) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	err = NotifyAllUsersInTx(tx, title, message, notifType)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+// NotifyAllUsersAdmin broadcasts a notification to all local users via Redis.
+// Kept for admin-panel use; delegates to the Redis fanout in notifications_redis.go.
+func NotifyAllUsersAdmin(title, message, notifType string) error {
+	_ = title // title not stored separately; message carries the full text
+	return NotifyAllUsers(notifType, message)
 }
 
+// NotifyAllUsersInTx is retained for callers that still hold a *sql.Tx.
+// The actual notification is pushed to Redis (outside the transaction).
 func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
-
-	_, err := tx.Exec(`
-		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, is_read, created_at)
-		SELECT user_id, 'admin', $1, $2, false, NOW()
-		FROM identities
-	`, notifType, message)
-
-	return err
+	_ = tx // no longer writes to the notifications table
+	return NotifyAllUsers(notifType, message)
 }
 
 func GetServerStats() (*ServerStats, error) {

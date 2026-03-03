@@ -2,6 +2,7 @@ package identity
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -716,6 +717,61 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 	return posts, rows.Err()
 }
 
+// ── Privacy Settings ────────────────────────────────────────────────────────
+
+// GetPrivacySettings returns the privacy settings for a user, falling back to
+// sensible defaults (fully public) when the user has never saved settings.
+func GetPrivacySettings(userID string) (*models.PrivacySettings, error) {
+	var s models.PrivacySettings
+	err := db.QueryRow(`
+		SELECT user_id, search_local, search_federated, posts_visibility,
+		       likes_visibility, replies_visibility, following_list_visibility,
+		       followers_list_visibility, created_at, updated_at
+		FROM privacy_settings WHERE user_id = $1
+	`, userID).Scan(
+		&s.UserID, &s.SearchLocal, &s.SearchFederated, &s.PostsVisibility,
+		&s.LikesVisibility, &s.RepliesVisibility, &s.FollowingListVisibility,
+		&s.FollowersListVisibility, &s.CreatedAt, &s.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return &models.PrivacySettings{
+			UserID:                  userID,
+			SearchLocal:             "everyone",
+			SearchFederated:         "everyone",
+			PostsVisibility:         "public",
+			LikesVisibility:         "public",
+			RepliesVisibility:       "public",
+			FollowingListVisibility: "public",
+			FollowersListVisibility: "public",
+		}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// UpsertPrivacySettings creates or updates the privacy settings for a user.
+func UpsertPrivacySettings(s models.PrivacySettings) error {
+	_, err := db.Exec(`
+		INSERT INTO privacy_settings
+			(user_id, search_local, search_federated, posts_visibility,
+			 likes_visibility, replies_visibility, following_list_visibility, followers_list_visibility)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (user_id) DO UPDATE SET
+			search_local              = EXCLUDED.search_local,
+			search_federated          = EXCLUDED.search_federated,
+			posts_visibility          = EXCLUDED.posts_visibility,
+			likes_visibility          = EXCLUDED.likes_visibility,
+			replies_visibility        = EXCLUDED.replies_visibility,
+			following_list_visibility = EXCLUDED.following_list_visibility,
+			followers_list_visibility = EXCLUDED.followers_list_visibility,
+			updated_at                = NOW()
+	`, s.UserID, s.SearchLocal, s.SearchFederated, s.PostsVisibility,
+		s.LikesVisibility, s.RepliesVisibility, s.FollowingListVisibility, s.FollowersListVisibility)
+	return err
+}
+
 func CreateNotification(recipientID, actorID, typeStr, entityID string) error {
 	return CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID, nil)
 }
@@ -736,19 +792,17 @@ func CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID string
 		return nil
 	}
 
-	// Local recipient — store in DB.
-	if as2Err != nil {
-		// Fall back: insert without activity_stream
-		_, err := db.Exec(`
-			INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
-			VALUES ($1, $2, $3, $4, NOW())
-		`, recipientID, actorID, typeStr, entityID)
-		return err
+	// Local recipient — push to Redis.
+	n := UserNotification{
+		ID:        uuid.New().String(),
+		Recipient: recipientID,
+		Actor:     actorID,
+		Type:      typeStr,
+		EntityID:  entityID,
+		CreatedAt: time.Now().UTC(),
 	}
-
-	_, err := db.Exec(`
-		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, activity_stream, created_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
-	`, recipientID, actorID, typeStr, entityID, as2Bytes)
-	return err
+	if as2Err == nil && len(as2Bytes) > 0 {
+		n.ActivityStream = json.RawMessage(as2Bytes)
+	}
+	return PushNotification(n)
 }

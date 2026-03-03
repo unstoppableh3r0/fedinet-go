@@ -19,5 +19,18 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: fedinet_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
 volumes:
+  # postgres_data holds ALL server-side state:
+  #   - user identities, posts, follows, notifications, messages
+  #   - trusted-server registry, federation config
+  #   - admin dashboard growth-trend snapshots  ← cleared with 'docker-compose down -v'
+  #
+  # Run 'docker-compose down -v' to wipe every server and reset to a clean slate.
   postgres_data:

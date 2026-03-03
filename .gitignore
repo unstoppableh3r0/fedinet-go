@@ -26,22 +26,55 @@ test_out*.txt
 go.work
 go.work.sum
 
-# env file
+# env files
 .env
+.env.*
 !.env.example
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
+# OS junk
 .DS_Store
+Thumbs.db
+
 # Binaries
 *.exe
 server
 
+# Node / npm (cleanup scripts)
+node_modules/
+package-lock.json
+
+# Logs
+*.log
+*.log.*
+logs/
+
+# Certificates / keys
+*.pem
+*.p12
+*.key
+*.crt
+
+# Go profiling
+*.prof
+cpu.prof
+mem.prof
+
+# Temp
+tmp/
+temp/
+
 # Test reports
 backend_test_report.txt
 frontend_test_report.txt
+coverage.out
+coverage.html
 
 # Local frontend copy (if not part of backend repo)
 frontend/

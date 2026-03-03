@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -484,4 +485,78 @@ func SaveAdminSnapshotHandler(w http.ResponseWriter, r *http.Request) {
 	`, maxAdminSnapshots)
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ── Admin: account link graph ─────────────────────────────────────
+
+// GET /admin/account/links?user_id=alice@server_a
+// Returns the full link graph for a given user_id (admin-only).
+// If user_id is omitted, returns ALL account links on the server.
+func AdminGetAccountLinksHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	rawUserID := r.URL.Query().Get("user_id")
+
+	var rows *sql.Rows
+	var err error
+
+	if rawUserID == "" {
+		rows, err = db.Query(`
+			SELECT id, requester_id, target_id, status, created_at, updated_at
+			FROM account_links
+			ORDER BY updated_at DESC
+		`)
+	} else {
+		userID := ToInternalID(rawUserID)
+		rows, err = db.Query(`
+			SELECT id, requester_id, target_id, status, created_at, updated_at
+			FROM account_links
+			WHERE requester_id=$1 OR target_id=$1
+			ORDER BY updated_at DESC
+		`, userID)
+	}
+	if err != nil {
+		log.Printf("AdminGetAccountLinks: query error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to query links")
+		return
+	}
+	defer rows.Close()
+
+	type linkRow struct {
+		ID          string `json:"id"`
+		RequesterID string `json:"requester_id"`
+		TargetID    string `json:"target_id"`
+		Status      string `json:"status"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
+	}
+	var links []linkRow
+
+	for rows.Next() {
+		var l AccountLink
+		if err := rows.Scan(&l.ID, &l.RequesterID, &l.TargetID, &l.Status, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			continue
+		}
+		links = append(links, linkRow{
+			ID:          l.ID,
+			RequesterID: ToExternalID(l.RequesterID),
+			TargetID:    ToExternalID(l.TargetID),
+			Status:      l.Status,
+			CreatedAt:   l.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:   l.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	if links == nil {
+		links = []linkRow{}
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"user_id": rawUserID,
+		"links":   links,
+		"count":   len(links),
+	})
 }

@@ -296,6 +296,23 @@ func ApplyMigrations() {
 			follows    INT       NOT NULL DEFAULT 0
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_snapshots_ts ON admin_snapshots(ts);`,
+
+		// Account linking — direct, non-transitive identity graph.
+		// A<->B and B<->C does NOT imply A<->C.
+		// Only the requester (account that created the link) may remove it.
+		`CREATE TABLE IF NOT EXISTS account_links (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			requester_id TEXT NOT NULL,
+			target_id    TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'pending',
+			created_at   TIMESTAMP DEFAULT NOW(),
+			updated_at   TIMESTAMP DEFAULT NOW(),
+			UNIQUE(requester_id, target_id),
+			FOREIGN KEY (requester_id) REFERENCES identities(user_id) ON DELETE CASCADE,
+			FOREIGN KEY (target_id)    REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_account_links_requester ON account_links(requester_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_account_links_target    ON account_links(target_id);`,
 	}
 
 	for _, schema := range schemas {

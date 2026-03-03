@@ -123,6 +123,14 @@ func main() {
 	mux.HandleFunc("/unblock", identity.UnblockUserHandler)
 	mux.HandleFunc("/blocks", identity.GetBlocksHandler)
 
+	// Account linking (direct, non-transitive identity graph)
+	mux.HandleFunc("/account/link/request", identity.RequestAccountLinkHandler)
+	mux.HandleFunc("/account/link/accept", identity.AcceptAccountLinkHandler)
+	mux.HandleFunc("/account/link/reject", identity.RejectAccountLinkHandler)
+	mux.HandleFunc("/account/link/remove", identity.RemoveAccountLinkHandler)
+	mux.HandleFunc("/account/link/switch", identity.SwitchLinkedAccountHandler)
+	mux.HandleFunc("/account/links", identity.GetAccountLinksHandler)
+
 	// Keys & revocations
 	mux.HandleFunc("/revoke-key", identity.RevokeKeyHandler)
 	mux.HandleFunc("/revocations", identity.GetRevocationsHandler)
@@ -198,6 +206,9 @@ func main() {
 			identity.GetAdminSnapshotsHandler(w, r)
 		}
 	})))
+
+	// Admin account-link graph (view any user's or all-server links)
+	mux.Handle("/admin/account/links", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AdminGetAccountLinksHandler)))
 
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)

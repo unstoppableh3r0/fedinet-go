@@ -119,22 +119,18 @@ func HandleIncomingFederatedNotification(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Store the notification with its ActivityStream payload
-	var dbErr error
-	if len(req.ActivityStream) > 0 {
-		_, dbErr = db.Exec(`
-			INSERT INTO notifications (recipient_id, actor_id, type, entity_id, activity_stream, created_at)
-			VALUES ($1, $2, $3, $4, $5, NOW())
-		`, req.RecipientID, req.ActorID, req.Type, req.EntityID, []byte(req.ActivityStream))
-	} else {
-		_, dbErr = db.Exec(`
-			INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
-			VALUES ($1, $2, $3, $4, NOW())
-		`, req.RecipientID, req.ActorID, req.Type, req.EntityID)
+	// Push the notification to Redis.
+	n := UserNotification{
+		Recipient: req.RecipientID,
+		Actor:     req.ActorID,
+		Type:      req.Type,
+		EntityID:  req.EntityID,
 	}
-
-	if dbErr != nil {
-		log.Printf("HandleIncomingFederatedNotification: db error: %v", dbErr)
+	if len(req.ActivityStream) > 0 {
+		n.ActivityStream = req.ActivityStream
+	}
+	if pushErr := PushNotification(n); pushErr != nil {
+		log.Printf("HandleIncomingFederatedNotification: redis error: %v", pushErr)
 		RespondWithError(w, http.StatusInternalServerError, "failed to store notification")
 		return
 	}

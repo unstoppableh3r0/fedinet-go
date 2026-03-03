@@ -51,6 +51,9 @@ func main() {
 	// Inject database into identity package
 	identity.SetDB(database)
 
+	// Connect to Redis for notification storage
+	identity.InitRedis()
+
 	// Run migrations
 	identity.ApplyMigrations()
 
@@ -186,6 +189,15 @@ func main() {
 	mux.Handle("/admin/trusted-servers/add", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AddTrustedServerHandler)))
 	mux.Handle("/admin/trusted-servers/remove", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RemoveTrustedServerHandler)))
 	mux.Handle("/admin/trusted-servers/test", identity.AdminAuthMiddleware(http.HandlerFunc(identity.TestTrustedServerConnectionHandler)))
+
+	// Admin dashboard growth-trend snapshots (persisted in Postgres, cleared with Docker volumes)
+	mux.Handle("/admin/snapshots", identity.AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			identity.SaveAdminSnapshotHandler(w, r)
+		} else {
+			identity.GetAdminSnapshotsHandler(w, r)
+		}
+	})))
 
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)

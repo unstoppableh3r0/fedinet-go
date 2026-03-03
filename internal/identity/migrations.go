@@ -283,6 +283,19 @@ func ApplyMigrations() {
 			version       INT  NOT NULL DEFAULT 0,
 			updated_at    TIMESTAMP DEFAULT NOW()
 		);`,
+
+		// Admin dashboard growth-trend snapshots.
+		// Stored in Postgres so data is scoped to the Docker volume and is
+		// automatically removed when `docker-compose down -v` wipes postgres_data.
+		`CREATE TABLE IF NOT EXISTS admin_snapshots (
+			id         BIGSERIAL PRIMARY KEY,
+			ts         BIGINT    NOT NULL,
+			users      INT       NOT NULL DEFAULT 0,
+			posts      INT       NOT NULL DEFAULT 0,
+			activities INT       NOT NULL DEFAULT 0,
+			follows    INT       NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_snapshots_ts ON admin_snapshots(ts);`,
 	}
 
 	for _, schema := range schemas {

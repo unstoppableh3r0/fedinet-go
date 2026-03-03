@@ -191,12 +191,15 @@ func SignFederatedRequest(method, path, timestamp string) (string, error) {
 
 // FederatedUserProfile represents a user profile from remote server
 type FederatedUserProfile struct {
-	UserID      string `json:"user_id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	AvatarURL   string `json:"avatar_url"`
-	Bio         string `json:"bio"`
-	HomeServer  string `json:"home_server"`
+	UserID       string `json:"user_id"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"display_name"`
+	AvatarURL    string `json:"avatar_url"`
+	BannerURL    string `json:"banner_url"`
+	Bio          string `json:"bio"`
+	Location     string `json:"location"`
+	PortfolioURL string `json:"portfolio_url"`
+	HomeServer   string `json:"home_server"`
 }
 
 // SearchFederatedUser queries a remote server for user information.
@@ -358,17 +361,20 @@ func GetPublicUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Query local database for user
 	// user_id format is "username@server", so we need to match the username part
-	var userID, displayName, avatarURL, bio, homeServer string
+	var userID, displayName, avatarURL, bannerURL, bio, location, portfolioURL, homeServer string
 	err := db.QueryRow(`
 		SELECT i.user_id,
 		       COALESCE(p.display_name, ''),
 		       COALESCE(p.avatar_url, ''),
+		       COALESCE(p.banner_url, ''),
 		       COALESCE(p.bio, ''),
+		       COALESCE(p.location, ''),
+		       COALESCE(p.portfolio_url, ''),
 		       COALESCE(i.home_server, '')
 		FROM identities i
 		JOIN profiles p ON i.user_id = p.user_id
 		WHERE i.user_id LIKE $1 OR SPLIT_PART(i.user_id, '@', 1) = $2
-	`, username+"@%", username).Scan(&userID, &displayName, &avatarURL, &bio, &homeServer)
+	`, username+"@%", username).Scan(&userID, &displayName, &avatarURL, &bannerURL, &bio, &location, &portfolioURL, &homeServer)
 
 	if err == sql.ErrNoRows {
 		log.Printf("User '%s' not found in database", username)
@@ -387,12 +393,15 @@ func GetPublicUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Return public profile
 	RespondWithJSON(w, http.StatusOK, FederatedUserProfile{
-		UserID:      userID,
-		Username:    username,
-		DisplayName: displayName,
-		AvatarURL:   avatarURL,
-		Bio:         bio,
-		HomeServer:  homeServer,
+		UserID:       userID,
+		Username:     username,
+		DisplayName:  displayName,
+		AvatarURL:    avatarURL,
+		BannerURL:    bannerURL,
+		Bio:          bio,
+		Location:     location,
+		PortfolioURL: portfolioURL,
+		HomeServer:   homeServer,
 	})
 }
 

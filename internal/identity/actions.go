@@ -2,6 +2,7 @@ package identity
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -736,19 +737,17 @@ func CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID string
 		return nil
 	}
 
-	// Local recipient — store in DB.
-	if as2Err != nil {
-		// Fall back: insert without activity_stream
-		_, err := db.Exec(`
-			INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
-			VALUES ($1, $2, $3, $4, NOW())
-		`, recipientID, actorID, typeStr, entityID)
-		return err
+	// Local recipient — push to Redis.
+	n := UserNotification{
+		ID:        uuid.New().String(),
+		Recipient: recipientID,
+		Actor:     actorID,
+		Type:      typeStr,
+		EntityID:  entityID,
+		CreatedAt: time.Now().UTC(),
 	}
-
-	_, err := db.Exec(`
-		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, activity_stream, created_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
-	`, recipientID, actorID, typeStr, entityID, as2Bytes)
-	return err
+	if as2Err == nil && len(as2Bytes) > 0 {
+		n.ActivityStream = json.RawMessage(as2Bytes)
+	}
+	return PushNotification(n)
 }

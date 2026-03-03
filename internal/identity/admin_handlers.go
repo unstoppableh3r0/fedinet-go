@@ -378,3 +378,110 @@ func GetInviteQRHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(png)
 }
+
+// AdminSnapshot is a single growth-trend data point persisted in Postgres.
+type AdminSnapshot struct {
+	TS         int64 `json:"ts"`
+	Users      int   `json:"users"`
+	Posts      int   `json:"posts"`
+	Activities int   `json:"activities"`
+	Follows    int   `json:"follows"`
+}
+
+const maxAdminSnapshots = 60
+
+// GetAdminSnapshotsHandler returns the stored admin dashboard trend snapshots.
+//
+//	GET /admin/snapshots
+func GetAdminSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT ts, users, posts, activities, follows
+		FROM admin_snapshots
+		ORDER BY ts ASC
+		LIMIT $1
+	`, maxAdminSnapshots)
+	if err != nil {
+		log.Printf("GetAdminSnapshotsHandler: query error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch snapshots")
+		return
+	}
+	defer rows.Close()
+
+	snaps := []AdminSnapshot{}
+	for rows.Next() {
+		var s AdminSnapshot
+		if err := rows.Scan(&s.TS, &s.Users, &s.Posts, &s.Activities, &s.Follows); err != nil {
+			continue
+		}
+		snaps = append(snaps, s)
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{"snapshots": snaps})
+}
+
+// SaveAdminSnapshotHandler upserts a single snapshot into the DB.
+// If a snapshot taken within the last 5 minutes already exists it is updated in place;
+// otherwise a new row is appended. Rows beyond maxAdminSnapshots are pruned.
+//
+//	POST /admin/snapshots
+func SaveAdminSnapshotHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var snap AdminSnapshot
+	if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if snap.TS == 0 {
+		RespondWithError(w, http.StatusBadRequest, "ts is required")
+		return
+	}
+
+	fiveMinMs := int64(5 * 60 * 1000)
+	// Check for a recent snapshot we should update instead of inserting
+	var existingID int64
+	err := db.QueryRow(`
+		SELECT id FROM admin_snapshots
+		WHERE $1 - ts < $2
+		ORDER BY ts DESC LIMIT 1
+	`, snap.TS, fiveMinMs).Scan(&existingID)
+
+	if err == nil {
+		// Update the recent snapshot
+		_, err = db.Exec(`
+			UPDATE admin_snapshots
+			SET ts=$1, users=$2, posts=$3, activities=$4, follows=$5
+			WHERE id=$6
+		`, snap.TS, snap.Users, snap.Posts, snap.Activities, snap.Follows, existingID)
+	} else {
+		// Insert a new row
+		_, err = db.Exec(`
+			INSERT INTO admin_snapshots (ts, users, posts, activities, follows)
+			VALUES ($1, $2, $3, $4, $5)
+		`, snap.TS, snap.Users, snap.Posts, snap.Activities, snap.Follows)
+	}
+
+	if err != nil {
+		log.Printf("SaveAdminSnapshotHandler: write error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to save snapshot")
+		return
+	}
+
+	// Prune oldest rows if we exceed the cap
+	db.Exec(`
+		DELETE FROM admin_snapshots
+		WHERE id NOT IN (
+			SELECT id FROM admin_snapshots ORDER BY ts DESC LIMIT $1
+		)
+	`, maxAdminSnapshots)
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}

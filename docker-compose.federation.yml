@@ -33,6 +33,14 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Shared Redis for notifications ──
+  redis:
+    image: redis:7-alpine
+    container_name: fedinet_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   # ── SERVER A ──
 
   server-a-identity:
@@ -44,6 +52,7 @@ services:
       - "8080:8082"
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_a?sslmode=disable
+      REDIS_URL: redis://redis:6379
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: password123
       SERVER_ID: server_a
@@ -56,6 +65,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   server-a-federation:
@@ -86,6 +97,7 @@ services:
       - "9080:8082"
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_b?sslmode=disable
+      REDIS_URL: redis://redis:6379
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: password123
       JWT_SECRET: fedinet-dev-secret-key-server-b
@@ -98,6 +110,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   server-b-federation:

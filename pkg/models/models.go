@@ -239,6 +239,12 @@ type Report struct {
 	ResolvedBy   *string      `json:"resolved_by,omitempty"`
 }
 
+type ModerationQueueItem struct {
+	ContentID      string  `json:"content_id"`
+	ToxicityScore  float64 `json:"toxicity_score"`
+	Recommendation string  `json:"recommendation"`
+}
+
 type BlockedServer struct {
 	ID        int64     `json:"id"`
 	Domain    string    `json:"domain"`

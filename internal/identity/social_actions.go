@@ -25,9 +25,9 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 		LEFT JOIN likes l ON p.id = l.post_id
 		LEFT JOIN replies r ON p.id = r.post_id
 		LEFT JOIN reposts rp ON p.id = rp.post_id
-		WHERE p.author IN (
+		WHERE p.visibility = 'PUBLIC' AND (p.author IN (
 			SELECT followee_user_id FROM follows WHERE follower_user_id = $1
-		) OR p.author = $1
+		) OR p.author = $1)
 		GROUP BY p.id, p.author, p.content, p.created_at, p.updated_at, p.image_url
 		ORDER BY p.created_at DESC
 		LIMIT $2 OFFSET $3

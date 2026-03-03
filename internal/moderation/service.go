@@ -67,6 +67,22 @@ func (s *Service) ListPendingReports() ([]models.Report, error) {
 	return s.repo.ListPendingReports()
 }
 
+func (s *Service) GetModerationQueue() ([]map[string]interface{}, error) {
+	return s.repo.GetModerationQueue()
+}
+
+func (s *Service) UpdateReviewStatus(contentID string, status string) error {
+	err := s.repo.UpdateReviewStatus(contentID, status)
+	if err != nil {
+		return err
+	}
+
+	if status == "APPROVED" {
+		return s.repo.UpdatePostVisibility(contentID, "PUBLIC")
+	}
+	return nil
+}
+
 // REPORT RESOLUTION
 
 func (s *Service) ResolveReport(

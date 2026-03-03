@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+
+	aimoderation "github.com/unstoppableh3r0/fedinet-go/internal/ai-moderation-service"
 )
 
 func GetFeedHandler(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +177,31 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 
 	if req.UserID == "" || req.PostID == "" || req.Content == "" {
 		RespondWithError(w, http.StatusBadRequest, "missing fields")
+		return
+	}
+
+	// ⭐ STEP A — AI MODERATION
+	aiResult, err := aimoderation.CallModerationAPI(req.Content)
+	if err != nil {
+		log.Println("AI moderation failed, continuing without AI:", err)
+
+		// fallback safe response
+		aiResult = &aimoderation.ModerationResponse{
+			Toxicity:       0.0,
+			Hate:           0.0,
+			Spam:           0.0,
+			Threat:         0.0,
+			Confidence:     0.0,
+			Recommendation: "SAFE",
+		}
+	}
+
+	// ⭐ STEP B — BLOCK OR FLAG
+	if aiResult.Recommendation != "SAFE" {
+		RespondWithJSON(w, http.StatusAccepted, map[string]interface{}{
+			"status":     "reply_flagged",
+			"moderation": aiResult,
+		})
 		return
 	}
 

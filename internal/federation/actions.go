@@ -51,6 +51,14 @@ func SendFederatedActivity(activityID uuid.UUID, targetServer string, activityTy
 
 func DeliverWithRetry(messageID uuid.UUID, targetServer, activityType, actorID string, targetID *string, payload map[string]interface{}, attemptNumber int) error {
 
+	if payload != nil {
+		payload["moderation"] = map[string]interface{}{
+			"origin_server": true,
+			"moderated_at":  time.Now().UTC(),
+		}
+	}
+	log.Println("Outgoing federation payload:", payload)
+
 	// Server B expects InboxRequest, not FederationRequest
 	message := models.InboxRequest{
 		ActivityType: activityType,

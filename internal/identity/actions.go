@@ -379,17 +379,17 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 	return nil
 }
 
-func CreatePost(userID, content string, imageURL *string) (string, error) {
+func CreatePost(userID, content string, imageURL *string, visibility string) (string, error) {
 	// Allow image-only posts by using a space sentinel when content is empty
 	if content == "" {
 		content = " "
 	}
 	var postID string
 	err := db.QueryRow(`
-		INSERT INTO posts (author, content, image_url, created_at, updated_at)
-		VALUES ($1, $2, $3, NOW(), NOW())
+		INSERT INTO posts (author, content, image_url, visibility, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
 		RETURNING id
-	`, userID, content, imageURL).Scan(&postID)
+	`, userID, content, imageURL, visibility).Scan(&postID)
 
 	if err != nil {
 		return "", err
@@ -564,7 +564,7 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted,
 			p.image_url
 		FROM posts p
-		WHERE p.author = $1
+		WHERE p.author = $1 AND p.visibility = 'PUBLIC'
 		ORDER BY p.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
@@ -611,6 +611,7 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
 			p.image_url
 		FROM posts p
+		WHERE p.visibility = 'PUBLIC'
 		ORDER BY p.created_at DESC
 		LIMIT $2
 	`

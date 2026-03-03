@@ -9,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/unstoppableh3r0/fedinet-go/internal/identity"
+	"github.com/unstoppableh3r0/fedinet-go/internal/moderation"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -97,6 +98,26 @@ func main() {
 	mux.HandleFunc("/posts/user", identity.GetUserPostsHandler)
 	mux.HandleFunc("/posts/user/replies", identity.GetUserRepliesHandler)
 	mux.HandleFunc("/posts/user/likes", identity.GetUserLikedPostsHandler)
+
+	// Moderation
+	mux.HandleFunc("/moderation/queue", func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.GetModerationQueue(w, r)
+	})
+	mux.HandleFunc("/moderation/approve", func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.ApproveContent(w, r)
+	})
+	mux.HandleFunc("/moderation/reject", func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.RejectContent(w, r)
+	})
 
 	// Users
 	mux.HandleFunc("/user/me", identity.MeHandler)

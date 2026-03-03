@@ -313,6 +313,21 @@ func ApplyMigrations() {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_account_links_requester ON account_links(requester_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_account_links_target    ON account_links(target_id);`,
+
+		// Per-user privacy settings — search visibility and activity visibility controls.
+		`CREATE TABLE IF NOT EXISTS privacy_settings (
+			user_id                  TEXT PRIMARY KEY,
+			search_local             TEXT NOT NULL DEFAULT 'everyone',
+			search_federated         TEXT NOT NULL DEFAULT 'everyone',
+			posts_visibility         TEXT NOT NULL DEFAULT 'public',
+			likes_visibility         TEXT NOT NULL DEFAULT 'public',
+			replies_visibility       TEXT NOT NULL DEFAULT 'public',
+			following_list_visibility TEXT NOT NULL DEFAULT 'public',
+			followers_list_visibility TEXT NOT NULL DEFAULT 'public',
+			created_at               TIMESTAMP DEFAULT NOW(),
+			updated_at               TIMESTAMP DEFAULT NOW(),
+			FOREIGN KEY (user_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
 	}
 
 	for _, schema := range schemas {

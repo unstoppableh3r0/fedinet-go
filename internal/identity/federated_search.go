@@ -391,6 +391,16 @@ func GetPublicUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Respect search_federated privacy setting — hide from cross-server lookup
+	if privSettings, privErr := GetPrivacySettings(userID); privErr == nil {
+		if privSettings.SearchFederated == "hidden" {
+			RespondWithJSON(w, http.StatusNotFound, map[string]string{
+				"error": "user not found",
+			})
+			return
+		}
+	}
+
 	// Return public profile
 	RespondWithJSON(w, http.StatusOK, FederatedUserProfile{
 		UserID:       userID,

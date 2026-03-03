@@ -210,6 +210,9 @@ func main() {
 	// Admin account-link graph (view any user's or all-server links)
 	mux.Handle("/admin/account/links", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AdminGetAccountLinksHandler)))
 
+	// Privacy settings
+	mux.HandleFunc("/privacy/settings", identity.PrivacySettingsHandler)
+
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))

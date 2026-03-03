@@ -53,9 +53,13 @@ services:
       SERVER_URL: http://localhost:8080
       SERVER_ENDPOINT: http://server_a_identity:8082
       FEDERATION_PEERS: "server_b=http://server_b_identity:8082"
+      AI_MODERATION_API_URL: http://ml-service:8090/moderate
+      AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
     depends_on:
       postgres:
         condition: service_healthy
+      ml-service:
+        condition: service_started
     restart: unless-stopped
 
   server-a-federation:
@@ -95,9 +99,13 @@ services:
       SERVER_ID: server_b
       SERVER_NAME: Server B
       FEDERATION_PEERS: "server_a=http://server_a_identity:8082"
+      AI_MODERATION_API_URL: http://ml-service:8090/moderate
+      AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
     depends_on:
       postgres:
         condition: service_healthy
+      ml-service:
+        condition: service_started
     restart: unless-stopped
 
   server-b-federation:
@@ -114,5 +122,28 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── ML Moderation Microservice (shared by both federation servers) ──────────
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: ml-service
+    ports:
+      - "8090:8090"
+    environment:
+      API_KEY: ${AI_MODERATION_API_KEY:-changeme}
+      PORT: 8090
+      FEEDBACK_FILE: /data/feedback.jsonl
+    volumes:
+      - ml_feedback:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  ml_feedback:

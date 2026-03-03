@@ -202,8 +202,6 @@ func GetConversations(userID string) ([]models.Message, error) {
 					ELSE recipient_id || '-' || sender_id
 				END
 			)
-			id, sender_id, recipient_id, content, created_at,
-			CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS other_user
 			id, sender_id, recipient_id, content, created_at, image_url
 			FROM messages
 			WHERE sender_id = $1 OR recipient_id = $1
@@ -214,7 +212,6 @@ func GetConversations(userID string) ([]models.Message, error) {
 				END,
 				created_at DESC
 		)
-		SELECT id, sender_id, recipient_id, content, created_at, other_user
 		SELECT id, sender_id, recipient_id, content, created_at, image_url
 		FROM latest_messages
 		ORDER BY created_at DESC
@@ -234,6 +231,12 @@ func GetConversations(userID string) ([]models.Message, error) {
 		if err != nil {
 			log.Printf("Error scanning conversation: %v", err)
 			continue
+		}
+		// Compute OtherUser so the handler can ToExternalID it
+		if m.Sender == userID {
+			m.OtherUser = m.Receiver
+		} else {
+			m.OtherUser = m.Sender
 		}
 		conversations = append(conversations, m)
 	}

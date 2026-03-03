@@ -283,6 +283,20 @@ func ApplyMigrations() {
 			version       INT  NOT NULL DEFAULT 0,
 			updated_at    TIMESTAMP DEFAULT NOW()
 		);`,
+
+		// Moderator role management table
+		`CREATE TABLE IF NOT EXISTS moderator_roles (
+			user_id     TEXT PRIMARY KEY,
+			username    TEXT NOT NULL,
+			assigned_by TEXT NOT NULL,
+			assigned_at TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// Ensure posts have a visibility column (PUBLIC | HIDDEN | PENDING_REVIEW)
+		`ALTER TABLE posts ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'PUBLIC';`,
+
+		// Index for quickly querying posts pending moderation review
+		`CREATE INDEX IF NOT EXISTS idx_posts_visibility ON posts(visibility);`,
 	}
 
 	for _, schema := range schemas {

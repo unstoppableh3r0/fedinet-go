@@ -89,6 +89,20 @@ func ApplyMigrations(db *sql.DB) {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_user_blocks_blocker ON user_blocks(blocker_user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_user_id);`,
+
+		// Moderation results from AI screening
+		`CREATE TABLE IF NOT EXISTS moderation_results (
+			id             BIGSERIAL PRIMARY KEY,
+			content_id     TEXT NOT NULL UNIQUE,
+			content_type   TEXT NOT NULL DEFAULT 'post',
+			toxicity_score DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+			recommendation TEXT NOT NULL DEFAULT 'SAFE',
+			review_status  TEXT NOT NULL DEFAULT 'PENDING',
+			created_at     TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+			updated_at     TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_moderation_results_status ON moderation_results(review_status);`,
+		`CREATE INDEX IF NOT EXISTS idx_moderation_results_toxicity ON moderation_results(toxicity_score DESC);`,
 	}
 
 	for _, query := range queries {

@@ -253,6 +253,11 @@ func GenerateInviteQR(code string) ([]byte, error) {
 	return qrcode.Encode(string(jsonData), qrcode.Medium, 256)
 }
 
+// GenerateQRForData encodes a plain string as a QR code PNG.
+func GenerateQRForData(data string) ([]byte, error) {
+	return qrcode.Encode(data, qrcode.Medium, 256)
+}
+
 // StartInviteSweeper runs a background goroutine that periodically revokes
 // invites whose expiry date has passed. It runs every minute and is safe to
 // call from main() alongside other startup workers.

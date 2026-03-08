@@ -4,6 +4,7 @@ tests.py — lightweight integration tests (no live model needed).
 Run with:  pytest tests.py -v
 """
 
+import contextlib
 import json
 import os
 from unittest.mock import patch, MagicMock
@@ -46,6 +47,7 @@ def test_moderate_wrong_token():
 
 
 # ── /moderate scoring ──────────────────────────────────────────────────────────
+@contextlib.contextmanager
 def _mock_score(scores: dict):
     classifier.model_loaded = True
     classifier.pipeline = MagicMock()

@@ -378,3 +378,30 @@ func GetInviteQRHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(png)
 }
+
+// GET /user/qr?data=<text>
+// Returns a PNG QR image encoding the given data string.
+// No authentication required — the caller provides the content to encode.
+func GetUserQRHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	data := r.URL.Query().Get("data")
+	if data == "" {
+		RespondWithError(w, http.StatusBadRequest, "data query parameter is required")
+		return
+	}
+
+	png, err := GenerateQRForData(data)
+	if err != nil {
+		log.Println("Failed to generate QR code:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to generate QR code")
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.WriteHeader(http.StatusOK)
+	w.Write(png)
+}

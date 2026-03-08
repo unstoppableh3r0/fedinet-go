@@ -214,6 +214,32 @@ func GetRecentPostsHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetUserPostsHandler handles GET /posts/user
 // Query params: user_id (required), viewer_id (optional), limit, offset
+// GetPostByIDHandler handles GET /post/get?post_id=...&viewer_id=...
+func GetPostByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	postID := r.URL.Query().Get("post_id")
+	if postID == "" {
+		RespondWithError(w, http.StatusBadRequest, "post_id required")
+		return
+	}
+
+	viewerID := r.URL.Query().Get("viewer_id")
+
+	post, err := GetPostByID(postID, ToInternalID(viewerID))
+	if err != nil {
+		log.Printf("GetPostByID error for post %s: %v", postID, err)
+		RespondWithError(w, http.StatusNotFound, "post not found")
+		return
+	}
+
+	post.Author = ToExternalID(post.Author)
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{"post": post})
+}
+
 func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -244,7 +270,21 @@ func GetUserPostsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	posts, err := GetUserPosts(ToInternalID(userID), ToInternalID(viewerID), limit, offset)
+	internalUserID := ToInternalID(userID)
+	internalViewerID := ToInternalID(viewerID)
+
+	// Enforce posts visibility
+	ps := getPrivacySettingsForUser(internalUserID)
+	if !canViewContent(ps.PostsVisibility, internalViewerID, internalUserID) {
+		RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"posts":  []interface{}{},
+			"limit":  limit,
+			"offset": offset,
+		})
+		return
+	}
+
+	posts, err := GetUserPosts(internalUserID, internalViewerID, limit, offset)
 	if err != nil {
 		log.Printf("GetUserPosts error for user %s: %v", userID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch user posts")
@@ -351,7 +391,7 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetUserRepliesHandler handles GET /posts/user/replies
-// Query params: user_id (required), limit, offset
+// Query params: user_id (required), viewer_id (optional), limit, offset
 func GetUserRepliesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -362,6 +402,10 @@ func GetUserRepliesHandler(w http.ResponseWriter, r *http.Request) {
 		RespondWithError(w, http.StatusBadRequest, "user_id required")
 		return
 	}
+	viewerID := r.URL.Query().Get("viewer_id")
+	if viewerID == "" {
+		viewerID = userID
+	}
 	limit, offset := 20, 0
 	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 100 {
 		limit = l
@@ -369,7 +413,20 @@ func GetUserRepliesHandler(w http.ResponseWriter, r *http.Request) {
 	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
 		offset = o
 	}
-	replies, err := GetUserReplies(ToInternalID(userID), limit, offset)
+
+	internalUserID := ToInternalID(userID)
+	internalViewerID := ToInternalID(viewerID)
+
+	// Enforce replies visibility
+	ps := getPrivacySettingsForUser(internalUserID)
+	if !canViewContent(ps.RepliesVisibility, internalViewerID, internalUserID) {
+		RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"replies": []interface{}{},
+		})
+		return
+	}
+
+	replies, err := GetUserReplies(internalUserID, limit, offset)
 	if err != nil {
 		log.Printf("GetUserReplies error for %s: %v", userID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch replies")
@@ -409,10 +466,64 @@ func GetUserLikedPostsHandler(w http.ResponseWriter, r *http.Request) {
 	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
 		offset = o
 	}
-	posts, err := GetUserLikedPosts(ToInternalID(userID), ToInternalID(viewerID), limit, offset)
+
+	internalUserID := ToInternalID(userID)
+	internalViewerID := ToInternalID(viewerID)
+
+	// Enforce likes visibility
+	ps := getPrivacySettingsForUser(internalUserID)
+	if !canViewContent(ps.LikesVisibility, internalViewerID, internalUserID) {
+		RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"posts": []interface{}{},
+		})
+		return
+	}
+
+	posts, err := GetUserLikedPosts(internalUserID, internalViewerID, limit, offset)
 	if err != nil {
 		log.Printf("GetUserLikedPosts error for %s: %v", userID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to fetch liked posts")
+		return
+	}
+	for i := range posts {
+		posts[i].Author = ToExternalID(posts[i].Author)
+	}
+	if posts == nil {
+		posts = []models.Post{}
+	}
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"posts": posts,
+	})
+}
+
+// GetUserRepostedPostsHandler handles GET /posts/user/reposts
+// Returns posts reposted (highlighted) by the given user.
+// Query params: user_id (required), viewer_id (optional), limit, offset
+func GetUserRepostedPostsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		RespondWithError(w, http.StatusBadRequest, "user_id required")
+		return
+	}
+	viewerID := r.URL.Query().Get("viewer_id")
+	if viewerID == "" {
+		viewerID = userID
+	}
+	limit, offset := 20, 0
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+		offset = o
+	}
+	posts, err := GetUserRepostedPosts(ToInternalID(userID), ToInternalID(viewerID), limit, offset)
+	if err != nil {
+		log.Printf("GetUserRepostedPosts error for %s: %v", userID, err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch reposted posts")
 		return
 	}
 	for i := range posts {

@@ -258,7 +258,7 @@ func IsFederatedUser(userID string) (bool, string) {
 func getCurrentServerName() string {
 	serverID := os.Getenv("SERVER_ID")
 	if serverID == "" {
-		serverID = "server-a"
+		return "localhost" // matches InternalServerName fallback
 	}
 	return serverID
 }

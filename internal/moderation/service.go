@@ -2,6 +2,7 @@ package moderation
 
 import (
 	"errors"
+	"log"
 	"time"
 
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
@@ -73,7 +74,10 @@ func (s *Service) GetModerationQueue() ([]map[string]interface{}, error) {
 
 func (s *Service) UpdateReviewStatus(contentID string, status string) error {
 	// Update moderation_results row if it exists (may be empty for AI-flagged posts)
-	_ = s.repo.UpdateReviewStatus(contentID, status)
+	if err := s.repo.UpdateReviewStatus(contentID, status); err != nil {
+		// Row may not exist yet for AI-flagged posts; log but continue
+		log.Printf("moderation: UpdateReviewStatus %q: %v", contentID, err)
+	}
 
 	switch status {
 	case "APPROVED":

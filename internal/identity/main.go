@@ -15,6 +15,29 @@ var InternalServerName = func() string {
 	return "localhost" // fallback for development
 }()
 
+// StartTOTPPartialTokenSweeper runs every 15 minutes to delete used or expired
+// rows from totp_partial_tokens, preventing unbounded table growth.
+func StartTOTPPartialTokenSweeper() {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+
+	log.Println("TOTP partial token sweeper started")
+
+	for range ticker.C {
+		res, err := db.Exec(`
+			DELETE FROM totp_partial_tokens
+			WHERE used = TRUE OR expires_at < NOW()
+		`)
+		if err != nil {
+			log.Printf("TOTP partial token sweep error: %v", err)
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("TOTP partial token sweep: removed %d expired/used rows", n)
+		}
+	}
+}
+
 // StartSessionKeyWorker runs periodically to rotate expired keys and cleanup old ones.
 // Call this from the service entry point to start background key rotation.
 func StartSessionKeyWorker() {

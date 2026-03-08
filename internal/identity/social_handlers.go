@@ -71,7 +71,20 @@ func GetFollowersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	viewerID := r.URL.Query().Get("viewer_id")
+
 	internalUserID := ToInternalID(userID)
+	internalViewerID := ToInternalID(viewerID)
+
+	// Enforce followers list visibility
+	ps := getPrivacySettingsForUser(internalUserID)
+	if !canViewContent(ps.FollowersListVisibility, internalViewerID, internalUserID) {
+		RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"followers": []interface{}{},
+			"count":     0,
+		})
+		return
+	}
 
 	followers, err := GetFollowers(internalUserID)
 	if err != nil {
@@ -253,7 +266,20 @@ func GetFollowingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	viewerID := r.URL.Query().Get("viewer_id")
+
 	internalUserID := ToInternalID(userID)
+	internalViewerID := ToInternalID(viewerID)
+
+	// Enforce following list visibility
+	ps := getPrivacySettingsForUser(internalUserID)
+	if !canViewContent(ps.FollowingListVisibility, internalViewerID, internalUserID) {
+		RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"following": []interface{}{},
+			"count":     0,
+		})
+		return
+	}
 
 	following, err := GetFollowing(internalUserID)
 	if err != nil {

@@ -14,8 +14,9 @@ import (
 )
 
 type AdminClaims struct {
-	Username string `json:"username"`
-	IsAdmin  bool   `json:"is_admin"`
+	Username    string `json:"username"`
+	IsAdmin     bool   `json:"is_admin"`
+	IsModerator bool   `json:"is_moderator"`
 	jwt.RegisteredClaims
 }
 

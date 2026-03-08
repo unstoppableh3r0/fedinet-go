@@ -202,9 +202,8 @@ func GetConversations(userID string) ([]models.Message, error) {
 					ELSE recipient_id || '-' || sender_id
 				END
 			)
-			id, sender_id, recipient_id, content, created_at,
+			id, sender_id, recipient_id, content, created_at, image_url,
 			CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS other_user
-			id, sender_id, recipient_id, content, created_at, image_url
 			FROM messages
 			WHERE sender_id = $1 OR recipient_id = $1
 			ORDER BY 
@@ -214,8 +213,7 @@ func GetConversations(userID string) ([]models.Message, error) {
 				END,
 				created_at DESC
 		)
-		SELECT id, sender_id, recipient_id, content, created_at, other_user
-		SELECT id, sender_id, recipient_id, content, created_at, image_url
+		SELECT id, sender_id, recipient_id, content, created_at, image_url, other_user
 		FROM latest_messages
 		ORDER BY created_at DESC
 		LIMIT 50

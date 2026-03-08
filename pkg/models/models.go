@@ -256,9 +256,9 @@ type BlockedServer struct {
 type FederationEventType string
 
 const (
-	EventAbuseReportForward  = "abuse_report_forward"
-	EventAbuseReportResolved = "abuse_report_resolved"
-	EventServerBlockNotice   = "server_block_notice"
+	EventAbuseReportForward  FederationEventType = "abuse_report_forward"
+	EventAbuseReportResolved FederationEventType = "abuse_report_resolved"
+	EventServerBlockNotice   FederationEventType = "server_block_notice"
 )
 
 type FederationEvent struct {

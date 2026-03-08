@@ -8,6 +8,8 @@ func RegisterRoutes(mux *http.ServeMux, handler *Handler) {
 	mux.HandleFunc("/moderation/reports", handler.ListPendingReports)
 	mux.HandleFunc("/moderation/queue", handler.GetModerationQueue)
 	mux.HandleFunc("/moderation/resolve", handler.ResolveReport)
+	mux.HandleFunc("/moderation/approve", handler.ApproveContent)
+	mux.HandleFunc("/moderation/reject", handler.RejectContent)
 
 	// Server blocking (admin)
 	mux.HandleFunc("/servers/block", handler.BlockServer)

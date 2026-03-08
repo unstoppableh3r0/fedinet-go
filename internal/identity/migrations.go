@@ -297,6 +297,44 @@ func ApplyMigrations() {
 
 		// Index for quickly querying posts pending moderation review
 		`CREATE INDEX IF NOT EXISTS idx_posts_visibility ON posts(visibility);`,
+
+		// Stats snapshots for admin dashboard trend charts
+		`CREATE TABLE IF NOT EXISTS server_stats_snapshots (
+			id          BIGSERIAL PRIMARY KEY,
+			total_users INT NOT NULL DEFAULT 0,
+			total_posts INT NOT NULL DEFAULT 0,
+			total_follows INT NOT NULL DEFAULT 0,
+			created_at  TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_stats_snapshots_created_at ON server_stats_snapshots(created_at DESC);`,
+
+		// User privacy settings
+		`CREATE TABLE IF NOT EXISTS privacy_settings (
+			user_id                   TEXT PRIMARY KEY,
+			search_local              TEXT NOT NULL DEFAULT 'everyone',
+			search_federated          TEXT NOT NULL DEFAULT 'everyone',
+			posts_visibility          TEXT NOT NULL DEFAULT 'public',
+			likes_visibility          TEXT NOT NULL DEFAULT 'public',
+			replies_visibility        TEXT NOT NULL DEFAULT 'public',
+			following_list_visibility TEXT NOT NULL DEFAULT 'public',
+			followers_list_visibility TEXT NOT NULL DEFAULT 'public',
+			created_at                TIMESTAMP DEFAULT NOW(),
+			updated_at                TIMESTAMP DEFAULT NOW(),
+			FOREIGN KEY (user_id) REFERENCES identities(user_id) ON DELETE CASCADE
+		);`,
+
+		// Account links: bidirectional connection requests (friend-request style)
+		`CREATE TABLE IF NOT EXISTS account_links (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			requester_id TEXT NOT NULL,
+			target_id    TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'pending',
+			created_at   TIMESTAMP DEFAULT NOW(),
+			updated_at   TIMESTAMP DEFAULT NOW(),
+			UNIQUE (requester_id, target_id)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_account_links_requester ON account_links(requester_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_account_links_target ON account_links(target_id);`,
 	}
 
 	for _, schema := range schemas {

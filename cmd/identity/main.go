@@ -57,6 +57,7 @@ func main() {
 
 	// Start background workers
 	go identity.StartSessionKeyWorker()
+	go identity.StartTOTPPartialTokenSweeper()
 	identity.StartInviteSweeper()
 
 	mux := http.NewServeMux()
@@ -75,7 +76,17 @@ func main() {
 	// Auth
 	mux.HandleFunc("/register", identity.RegisterHandler)
 	mux.HandleFunc("/login", identity.LoginHandler)
+	mux.HandleFunc("/login/totp", identity.LoginTOTPHandler)
+	mux.HandleFunc("/logout", identity.LogoutHandler)
+	mux.HandleFunc("/refresh-token", identity.RefreshTokenHandler)
 	mux.HandleFunc("/recover", identity.RecoverAccountHandler)
+
+	// TOTP / Authenticator-app key protection
+	mux.HandleFunc("/totp/setup", identity.TOTPSetupHandler)
+	mux.HandleFunc("/totp/enable", identity.TOTPEnableHandler)
+	mux.HandleFunc("/totp/status", identity.TOTPStatusHandler)
+	mux.HandleFunc("/totp/verify", identity.TOTPVerifyHandler)
+	mux.HandleFunc("/totp/disable", identity.TOTPDisableHandler)
 
 	// Social — core
 	mux.HandleFunc("/feed", identity.GetFeedHandler)
@@ -87,6 +98,7 @@ func main() {
 	mux.HandleFunc("/follower/remove", identity.RemoveFollowerHandler) // alias used by frontend
 
 	// Posts
+	mux.HandleFunc("/post/get", identity.GetPostByIDHandler)
 	mux.HandleFunc("/post/create", identity.CreatePostHandler)
 	mux.HandleFunc("/post/like", identity.ToggleLikeHandler)
 	mux.HandleFunc("/post/repost", identity.ToggleRepostHandler)
@@ -98,6 +110,7 @@ func main() {
 	mux.HandleFunc("/posts/user", identity.GetUserPostsHandler)
 	mux.HandleFunc("/posts/user/replies", identity.GetUserRepliesHandler)
 	mux.HandleFunc("/posts/user/likes", identity.GetUserLikedPostsHandler)
+	mux.HandleFunc("/posts/user/reposts", identity.GetUserRepostedPostsHandler)
 
 	// Users
 	mux.HandleFunc("/user/me", identity.MeHandler)
@@ -115,6 +128,9 @@ func main() {
 	// Notifications
 	mux.HandleFunc("/notifications", identity.GetNotificationsHandler)
 	mux.HandleFunc("/notifications/read", identity.MarkNotificationsReadHandler)
+
+	// Privacy
+	mux.HandleFunc("/privacy/settings", identity.PrivacySettingsHandler)
 
 	// Blocking
 	mux.HandleFunc("/block", identity.BlockUserHandler)
@@ -182,6 +198,9 @@ func main() {
 	mux.Handle("/admin/invites/revoke", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RevokeInviteHandler)))
 	mux.Handle("/admin/invites/qr", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetInviteQRHandler)))
 
+	// QR code generator — encodes arbitrary caller-provided data (no auth required)
+	mux.HandleFunc("/user/qr", identity.GetUserQRHandler)
+
 	// Admin trusted-server management (admin-prefixed aliases for the admin panel)
 	mux.Handle("/admin/trusted-servers/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetTrustedServersHandler)))
 	mux.Handle("/admin/trusted-servers/add", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AddTrustedServerHandler)))
@@ -201,6 +220,15 @@ func main() {
 
 	// ── Admin account links (graph view) ──────────────────────────────────────
 	mux.Handle("/admin/account/links", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAccountLinksHandler)))
+
+	// ── User account links (bidirectional connection requests) ────────────────
+	mux.HandleFunc("/account/links", identity.GetAccountLinksUserHandler)
+	mux.HandleFunc("/account/link/request", identity.RequestAccountLinkHandler)
+	mux.HandleFunc("/account/link/accept", identity.AcceptAccountLinkHandler)
+	mux.HandleFunc("/account/link/reject", identity.RejectAccountLinkHandler)
+	mux.HandleFunc("/account/link/remove", identity.RemoveAccountLinkHandler)
+	mux.HandleFunc("/account/link/switch", identity.SwitchAccountLinkHandler)
+	mux.HandleFunc("/account/link/sync", identity.SyncAccountLinkStatusHandler)
 
 	// ── Moderator role management (admin-only) ────────────────────────────────
 
@@ -240,8 +268,12 @@ func main() {
 
 	handler := corsMiddleware(mux)
 
-	log.Println("✅ Identity service listening on :8082")
-	if err := http.ListenAndServe(":8082", handler); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8082"
+	}
+	log.Printf("✅ Identity service listening on :%s", port)
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("❌ Server failed: %v", err)
 	}
 }

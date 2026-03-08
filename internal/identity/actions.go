@@ -717,6 +717,65 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 	return posts, rows.Err()
 }
 
+// GetUserRepostedPosts returns posts reposted by userID (used as "highlights" on profile).
+func GetUserRepostedPosts(userID, viewerUserID string, limit, offset int) ([]models.Post, error) {
+	rows, err := db.Query(`
+		SELECT p.id, p.author, p.content, p.created_at, p.updated_at,
+		       (SELECT COUNT(*) FROM likes   WHERE post_id = p.id) AS like_count,
+		       (SELECT COUNT(*) FROM replies WHERE post_id = p.id) AS reply_count,
+		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
+		       EXISTS(SELECT 1 FROM likes   WHERE post_id = p.id AND user_id = $2) AS has_liked,
+		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted,
+		       p.image_url
+		FROM posts p
+		INNER JOIN reposts rp ON rp.post_id = p.id
+		WHERE rp.user_id = $1
+		ORDER BY rp.created_at DESC
+		LIMIT $3 OFFSET $4
+	`, userID, viewerUserID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []models.Post
+	for rows.Next() {
+		var p models.Post
+		if err := rows.Scan(
+			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
+			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
+			&p.HasLiked, &p.HasReposted, &p.ImageURL,
+		); err != nil {
+			return nil, err
+		}
+		posts = append(posts, p)
+	}
+	return posts, rows.Err()
+}
+
+func GetPostByID(postID, viewerUserID string) (*models.Post, error) {
+	row := db.QueryRow(`
+		SELECT p.id, p.author, p.content, p.created_at, p.updated_at,
+		       (SELECT COUNT(*) FROM likes   WHERE post_id = p.id) AS like_count,
+		       (SELECT COUNT(*) FROM replies WHERE post_id = p.id) AS reply_count,
+		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
+		       EXISTS(SELECT 1 FROM likes   WHERE post_id = p.id AND user_id = $2) AS has_liked,
+		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted,
+		       p.image_url
+		FROM posts p
+		WHERE p.id = $1
+	`, postID, viewerUserID)
+	var p models.Post
+	if err := row.Scan(
+		&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
+		&p.LikeCount, &p.ReplyCount, &p.RepostCount,
+		&p.HasLiked, &p.HasReposted, &p.ImageURL,
+	); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 func CreateNotification(recipientID, actorID, typeStr, entityID string) error {
 	return CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID, nil)
 }

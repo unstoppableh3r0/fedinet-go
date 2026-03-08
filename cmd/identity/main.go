@@ -55,6 +55,10 @@ func main() {
 	// Run migrations
 	identity.ApplyMigrations()
 
+	// Seed server_config and server_identity from env vars (SERVER_NAME, SERVER_ID, SERVER_URL).
+	// This overwrites the blank placeholder inserted by migrations with the real server name.
+	identity.SeedServerConfig()
+
 	// Start background workers
 	go identity.StartSessionKeyWorker()
 	identity.StartInviteSweeper()

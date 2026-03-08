@@ -6,13 +6,7 @@ import (
 	"strconv"
 )
 
-type Handler struct {
-	service *Service
-}
-
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
-}
+// ─── REPORT HANDLERS ─────────────────────────────────────────────────────────
 
 func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -85,7 +79,7 @@ func (h *Handler) ResolveReport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ─── USER BLOCK HANDLERS ─────────────────────────────────────────────────────
+// ─── USER BLOCK HANDLERS ──────────────────────────────────────────────────────
 
 // POST /users/block
 func (h *Handler) BlockUser(w http.ResponseWriter, r *http.Request) {
@@ -215,72 +209,4 @@ func (h *Handler) BlockServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-}
-
-func (h *Handler) GetModerationQueue(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	results, err := h.service.GetModerationQueue()
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
-}
-
-func (h *Handler) ApproveContent(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		ContentID string `json:"content_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	err := h.service.UpdateReviewStatus(req.ContentID, "APPROVED")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"approved"}`))
-}
-
-func (h *Handler) RejectContent(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		ContentID string `json:"content_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	err := h.service.UpdateReviewStatus(req.ContentID, "REJECTED")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"rejected"}`))
 }

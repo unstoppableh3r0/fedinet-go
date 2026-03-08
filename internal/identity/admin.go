@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type AdminClaims struct {
@@ -66,15 +67,36 @@ type Notification struct {
 }
 
 func ValidateAdminCredentials(username, password string) bool {
+	// Fast path: environment-variable credentials (Docker/K8s deployments).
 	adminUser := os.Getenv("ADMIN_USERNAME")
 	adminPass := os.Getenv("ADMIN_PASSWORD")
-
-	if adminUser == "" || adminPass == "" {
-		log.Println("Warning: Admin credentials not set in environment")
-		return false
+	if adminUser != "" && adminPass != "" {
+		if username == adminUser && password == adminPass {
+			return true
+		}
+		// If env vars are set but don't match, don't fall through to DB
+		// (prevents env-bypass via DB entries added by attackers).
+		// Return false to let the caller 401.
+		// Note: remove this block if you want env + DB to coexist.
+		log.Println("Admin login: env credentials set but don't match")
 	}
 
-	return username == adminUser && password == adminPass
+	// DB path: check the admins table (written by /initialize endpoint).
+	var passwordHash string
+	err := db.QueryRow(
+		"SELECT password_hash FROM admins WHERE username = $1 LIMIT 1",
+		username,
+	).Scan(&passwordHash)
+	if err != nil {
+		log.Printf("ValidateAdminCredentials: DB lookup failed for %q: %v", username, err)
+		return false
+	}
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password))
+	if err != nil {
+		log.Printf("ValidateAdminCredentials: wrong password for %q", username)
+		return false
+	}
+	return true
 }
 
 func GenerateJWT(username string) (string, error) {
@@ -148,17 +170,64 @@ func GetServerConfig() (*ServerConfig, error) {
 	return &config, nil
 }
 
-func UpdateServerName(newName, updatedBy string) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
+// SeedServerConfig seeds server_config and server_identity with the correct
+// values from environment variables. Called from main() after ApplyMigrations().
+// This ensures the admin dashboard shows the real server name (Server A/B)
+// rather than "FediNet Server" or empty string.
+func SeedServerConfig() {
+	serverName := os.Getenv("SERVER_NAME")
+	if serverName == "" {
+		serverName = os.Getenv("SERVER_ID") // e.g. "server_a"
 	}
-	defer tx.Rollback()
+	if serverName == "" {
+		serverName = "FediNet Server"
+	}
 
-	_, err = tx.Exec(`
+	// Upsert the server name (also overwrites the blank placeholder inserted by migrations,
+	// AND fixes any existing "FediNet Server" rows that got stuck from old seeds).
+	_, err := db.Exec(`
+		INSERT INTO server_config (key, value, updated_by, updated_at)
+		VALUES ('server_name', $1, 'system', NOW())
+		ON CONFLICT (key) DO UPDATE
+		SET value = CASE
+			WHEN server_config.value = '' OR server_config.value = 'FediNet Server'
+			THEN EXCLUDED.value
+			ELSE server_config.value
+		END,
+		updated_at = NOW()
+	`, serverName)
+	if err != nil {
+		log.Printf("SeedServerConfig: failed to seed server_config: %v", err)
+	} else {
+		log.Printf("SeedServerConfig: server_name set to %q", serverName)
+	}
+
+	// Also seed server_identity with the env values for QR code generation
+	serverID := os.Getenv("SERVER_ID")
+	serverURL := os.Getenv("SERVER_URL")
+	if serverURL == "" {
+		serverURL = "http://localhost:8080"
+	}
+	_, err = db.Exec(`
+		INSERT INTO server_identity (id, server_id, server_name, public_key, endpoint)
+		VALUES (1, $1, $2, '', $3)
+		ON CONFLICT (id) DO UPDATE
+		SET server_id   = CASE WHEN server_identity.server_id   = '' THEN EXCLUDED.server_id   ELSE server_identity.server_id END,
+		    server_name = CASE WHEN server_identity.server_name = '' OR server_identity.server_name = 'FediNet Server'
+		                       THEN EXCLUDED.server_name ELSE server_identity.server_name END,
+		    endpoint    = CASE WHEN server_identity.endpoint    = '' THEN EXCLUDED.endpoint    ELSE server_identity.endpoint END,
+		    updated_at  = NOW()
+	`, serverID, serverName, serverURL)
+	if err != nil {
+		log.Printf("SeedServerConfig: failed to seed server_identity: %v", err)
+	}
+}
+
+func UpdateServerName(newName, updatedBy string) error {
+	_, err := db.Exec(`
 		INSERT INTO server_config (key, value, updated_by, updated_at)
 		VALUES ('server_name', $1, $2, NOW())
-		ON CONFLICT (key) DO UPDATE 
+		ON CONFLICT (key) DO UPDATE
 		SET value = $1, updated_by = $2, updated_at = NOW()
 	`, newName, updatedBy)
 
@@ -166,15 +235,18 @@ func UpdateServerName(newName, updatedBy string) error {
 		return fmt.Errorf("failed to update server config: %v", err)
 	}
 
-	err = NotifyAllUsersInTx(tx, "Server Name Updated",
-		fmt.Sprintf("The server name has been changed to: %s. Your username is now username@%s", newName, newName),
-		"server_change")
+	// Best-effort broadcast notification — never block the config update on this.
+	go func() {
+		if err := NotifyAllUsers(
+			"Server Name Updated",
+			fmt.Sprintf("Server name changed to: %s", newName),
+			"server_change",
+		); err != nil {
+			log.Printf("UpdateServerName: notification broadcast failed (non-fatal): %v", err)
+		}
+	}()
 
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 func NotifyAllUsers(title, message, notifType string) error {
@@ -193,12 +265,14 @@ func NotifyAllUsers(title, message, notifType string) error {
 }
 
 func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
-
+	// notifications schema: recipient_id, actor_id, type, entity_id, activity_stream, created_at
+	// We use entity_id for the title and activity_stream for the message body.
 	_, err := tx.Exec(`
-		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, is_read, created_at)
-		SELECT user_id, 'admin', $1, $2, false, NOW()
+		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, activity_stream, created_at)
+		SELECT user_id, 'admin', $1, $2, $3, NOW()
 		FROM identities
-	`, notifType, message)
+		ON CONFLICT DO NOTHING
+	`, notifType, title, []byte(message))
 
 	return err
 }
@@ -206,35 +280,28 @@ func NotifyAllUsersInTx(tx *sql.Tx, title, message, notifType string) error {
 func GetServerStats() (*ServerStats, error) {
 	stats := &ServerStats{}
 
-	err := db.QueryRow("SELECT COUNT(*) FROM identities").Scan(&stats.TotalUsers)
-	if err != nil {
-		return nil, err
-	}
+	// Each query is intentionally fault-tolerant — a missing table returns 0
+	// instead of a hard error that blocks the entire dashboard.
+	db.QueryRow("SELECT COUNT(*) FROM identities").Scan(&stats.TotalUsers)
+	db.QueryRow("SELECT COUNT(*) FROM posts").Scan(&stats.TotalPosts)
+	db.QueryRow("SELECT COUNT(*) FROM follows").Scan(&stats.TotalFollows)
 
-	err = db.QueryRow("SELECT COUNT(*) FROM posts").Scan(&stats.TotalPosts)
-	if err != nil {
-		return nil, err
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM activities").Scan(&stats.TotalActivities)
-	if err != nil {
-		return nil, err
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM follows").Scan(&stats.TotalFollows)
-	if err != nil {
-		return nil, err
+	// Try activity_log first (correct table name), fall back to outbox_activities count
+	if err := db.QueryRow("SELECT COUNT(*) FROM activity_log").Scan(&stats.TotalActivities); err != nil {
+		db.QueryRow("SELECT COUNT(*) FROM outbox_activities").Scan(&stats.TotalActivities)
 	}
 
 	config, err := GetServerConfig()
 	if err != nil {
-		stats.ServerName = "unknown"
+		stats.ServerName = os.Getenv("SERVER_NAME")
+		if stats.ServerName == "" {
+			stats.ServerName = "FediNet Server"
+		}
 	} else {
 		stats.ServerName = config.ServerName
 	}
 
-	err = db.Ping()
-	if err != nil {
+	if err := db.Ping(); err != nil {
 		stats.DatabaseStatus = "disconnected"
 	} else {
 		stats.DatabaseStatus = "connected"

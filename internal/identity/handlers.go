@@ -208,8 +208,19 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🔥 Invite check FIRST (for integration test requirement)
-	if req.InviteCode == "" {
+	// Validate invite code — must be valid BEFORE we create any account.
+	// Allow registration without invite only when invite table is completely empty
+	// (fresh server bootstrap — first admin can self-register).
+	var inviteCount int
+	db.QueryRow("SELECT COUNT(*) FROM invites").Scan(&inviteCount)
+
+	if req.InviteCode != "" {
+		if _, err := ValidateInvite(req.InviteCode); err != nil {
+			RespondWithError(w, http.StatusForbidden, "invalid or expired invite: "+err.Error())
+			return
+		}
+	} else if inviteCount > 0 {
+		// Invites exist — code is required
 		RespondWithError(w, http.StatusForbidden, "invite code required")
 		return
 	}
@@ -257,9 +268,11 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark invite as used
-	if err := UseInvite(req.InviteCode, federatedUserID, r.RemoteAddr, r.UserAgent()); err != nil {
-		log.Printf("Failed to mark invite %s as used: %v", req.InviteCode, err)
+	// Mark invite as used (only if one was provided and validated above)
+	if req.InviteCode != "" {
+		if err := UseInvite(req.InviteCode, federatedUserID, r.RemoteAddr, r.UserAgent()); err != nil {
+			log.Printf("Failed to mark invite %s as used: %v", req.InviteCode, err)
+		}
 	}
 
 	// Generate session key (optional)

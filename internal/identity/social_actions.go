@@ -195,29 +195,27 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 
 func GetConversations(userID string) ([]models.Message, error) {
 	query := `
-		WITH latest_messages AS (
-			SELECT DISTINCT ON (
-				CASE 
-					WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
-					ELSE recipient_id || '-' || sender_id
-				END
-			)
-			id, sender_id, recipient_id, content, created_at,
-			CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS other_user
-			id, sender_id, recipient_id, content, created_at, image_url
-			FROM messages
-			WHERE sender_id = $1 OR recipient_id = $1
-			ORDER BY 
-				CASE 
-					WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
-					ELSE recipient_id || '-' || sender_id
-				END,
-				created_at DESC
+		SELECT DISTINCT ON (
+			CASE
+				WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
+				ELSE recipient_id || '-' || sender_id
+			END
 		)
-		SELECT id, sender_id, recipient_id, content, created_at, other_user
-		SELECT id, sender_id, recipient_id, content, created_at, image_url
-		FROM latest_messages
-		ORDER BY created_at DESC
+		id,
+		sender_id      AS sender,
+		recipient_id   AS receiver,
+		content,
+		created_at,
+		image_url,
+		CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS other_user
+		FROM messages
+		WHERE sender_id = $1 OR recipient_id = $1
+		ORDER BY
+			CASE
+				WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
+				ELSE recipient_id || '-' || sender_id
+			END,
+			created_at DESC
 		LIMIT 50
 	`
 
@@ -249,7 +247,12 @@ func GetConversations(userID string) ([]models.Message, error) {
 
 func GetConversationMessages(userID, otherUserID string) ([]models.Message, error) {
 	query := `
-		SELECT id, sender_id, recipient_id, content, created_at, image_url
+		SELECT id,
+		       sender_id    AS sender,
+		       recipient_id AS receiver,
+		       content,
+		       created_at,
+		       image_url
 		FROM messages
 		WHERE (sender_id = $1 AND recipient_id = $2)
 		   OR (sender_id = $2 AND recipient_id = $1)

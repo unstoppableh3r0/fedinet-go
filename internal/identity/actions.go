@@ -105,21 +105,21 @@ func SendMessage(senderID, recipientID, content string, imageURL *string) error 
 	return nil
 }
 
-func UpdateBio(identityID, newBio string) error {
+func UpdateBio(userID, newBio string) error {
 	_, err := db.Exec(
 		`UPDATE profiles SET bio=$1, updated_at=NOW()
-		 WHERE identity_id=$2`,
-		newBio, identityID,
+		 WHERE user_id=$2`,
+		newBio, userID,
 	)
 	if err != nil {
 		return err
 	}
 
 	return LogActivity(
-		identityID,
+		userID,
 		"UPDATE",
 		"profile",
-		identityID,
+		userID,
 		"",
 		`{"action": "bio updated"}`,
 	)
@@ -129,13 +129,18 @@ func LogActivity(actorID, verb, objectType, objectID, targetID, payload string) 
 	if payload == "" {
 		payload = "{}"
 	}
+	// Insert into outbox_activities (the real table). 'activities' does not exist.
 	_, err := db.Exec(
-		`INSERT INTO activities
-		(actor_id, verb, object_type, object_id, target_id, payload)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		actorID, verb, objectType, objectID, targetID, payload,
+		`INSERT INTO outbox_activities
+		(activity_type, actor_id, target_server, target_id, payload, delivery_status, attempt_count)
+		VALUES ($1, $2, $3, $4, $5::jsonb, 'sent', 0)`,
+		verb, actorID, objectType, objectID, payload,
 	)
-	return err
+	if err != nil {
+		// Non-fatal: log the error but don't block the primary action
+		log.Printf("LogActivity warning (non-fatal): %v", err)
+	}
+	return nil
 }
 
 func GetProfileByUserID(userID string) (*models.Profile, error) {

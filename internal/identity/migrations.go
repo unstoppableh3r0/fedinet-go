@@ -7,6 +7,143 @@ import (
 func ApplyMigrations() {
 	schemas := []string{
 
+		// ── Extensions & helpers ───────────────────────────────────────────────────
+		`CREATE EXTENSION IF NOT EXISTS pgcrypto;`,
+		`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`,
+
+		// ── CORE BASE TABLES ──────────────────────────────────────────────────────
+		// These tables MUST be created first — all other tables depend on them.
+		// Previously they were only in SQL files that were never executed at startup.
+
+		`CREATE TABLE IF NOT EXISTS identities (
+			id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			did              TEXT,
+			user_id          TEXT NOT NULL UNIQUE,
+			home_server      TEXT NOT NULL,
+			public_key       TEXT NOT NULL DEFAULT '',
+			private_key      TEXT DEFAULT '',
+			key_version      INTEGER DEFAULT 1,
+			recovery_key_hash TEXT DEFAULT '',
+			password_hash    TEXT DEFAULT '',
+			client_public_key TEXT,
+			allow_discovery  BOOLEAN DEFAULT true,
+			created_at       TIMESTAMP DEFAULT NOW(),
+			updated_at       TIMESTAMP DEFAULT NOW()
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS profiles (
+			user_id              TEXT PRIMARY KEY,
+			display_name         TEXT NOT NULL DEFAULT '',
+			avatar_url           TEXT,
+			banner_url           TEXT,
+			bio                  TEXT,
+			portfolio_url        TEXT,
+			birth_date           DATE,
+			location             TEXT,
+			followers_visibility TEXT DEFAULT 'public',
+			following_visibility TEXT DEFAULT 'public',
+			version              INTEGER DEFAULT 1,
+			created_at           TIMESTAMP DEFAULT NOW(),
+			updated_at           TIMESTAMP DEFAULT NOW()
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS posts (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			author     TEXT NOT NULL,
+			content    TEXT NOT NULL,
+			image_url  TEXT,
+			visibility TEXT NOT NULL DEFAULT 'PUBLIC',
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS activities (
+			id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			actor_id    TEXT NOT NULL,
+			verb        TEXT NOT NULL,
+			object_type TEXT,
+			object_id   TEXT,
+			target_id   TEXT,
+			payload     JSONB,
+			created_at  TIMESTAMP DEFAULT NOW()
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS follows (
+			follower_user_id    TEXT NOT NULL,
+			follower_home_server TEXT NOT NULL DEFAULT 'localhost',
+			followee_user_id    TEXT NOT NULL,
+			followee_home_server TEXT NOT NULL DEFAULT 'localhost',
+			created_at          TIMESTAMP DEFAULT NOW(),
+			updated_at          TIMESTAMP DEFAULT NOW(),
+			PRIMARY KEY (follower_user_id, followee_user_id)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS messages (
+			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			sender_id      TEXT NOT NULL,
+			recipient_id   TEXT NOT NULL,
+			content        TEXT NOT NULL,
+			image_url      TEXT,
+			is_federated   BOOLEAN NOT NULL DEFAULT FALSE,
+			origin_server  TEXT,
+			created_at     TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_sender    ON messages(sender_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id);`,
+
+		// Idempotent rename: if legacy sender/receiver columns exist, rename them.
+		`DO $$ BEGIN
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='sender' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_name='messages' AND column_name='sender_id')) THEN
+				ALTER TABLE messages RENAME COLUMN sender TO sender_id;
+			END IF;
+		EXCEPTION WHEN others THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='receiver') THEN
+				ALTER TABLE messages RENAME COLUMN receiver TO recipient_id;
+			END IF;
+		EXCEPTION WHEN others THEN NULL; END $$;`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_federated  BOOLEAN NOT NULL DEFAULT FALSE;`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS origin_server TEXT;`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS image_url     TEXT;`,
+
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			recipient_id   TEXT NOT NULL,
+			actor_id       TEXT,
+			type           TEXT NOT NULL,
+			entity_id      TEXT,
+			activity_stream JSONB,
+			is_read        BOOLEAN DEFAULT FALSE,
+			created_at     TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_is_read   ON notifications(is_read);`,
+
+		`CREATE TABLE IF NOT EXISTS block_events (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			blocker_id TEXT NOT NULL,
+			blocked_id TEXT NOT NULL,
+			reason     TEXT,
+			created_at TIMESTAMP DEFAULT NOW(),
+			UNIQUE(blocker_id, blocked_id)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS migration_status (
+			id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			from_db         TEXT NOT NULL,
+			to_db           TEXT NOT NULL,
+			status          TEXT NOT NULL,
+			tables_migrated JSONB,
+			error_message   TEXT,
+			started_at      TIMESTAMP DEFAULT NOW(),
+			completed_at    TIMESTAMP
+		);`,
+
+		`CREATE INDEX IF NOT EXISTS idx_posts_author  ON posts(author);`,
+		`CREATE INDEX IF NOT EXISTS idx_posts_visibility ON posts(visibility);`,
+		`CREATE INDEX IF NOT EXISTS idx_activities_actor ON activities(actor_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_block_events_blocker ON block_events(blocker_id);`,
+
 		`CREATE TABLE IF NOT EXISTS likes (
 			user_id TEXT NOT NULL,
 			post_id UUID NOT NULL,
@@ -297,6 +434,189 @@ func ApplyMigrations() {
 
 		// Index for quickly querying posts pending moderation review
 		`CREATE INDEX IF NOT EXISTS idx_posts_visibility ON posts(visibility);`,
+
+		// Moderation results for AI-flagged content
+		`CREATE TABLE IF NOT EXISTS moderation_results (
+			content_id      TEXT PRIMARY KEY,
+			content_type    TEXT NOT NULL,
+			toxicity_score  FLOAT NOT NULL,
+			recommendation  TEXT NOT NULL,
+			review_status   TEXT NOT NULL DEFAULT 'PENDING'
+		);`,
+
+		// Server snapshots for admin dashboard trend charts
+		`CREATE TABLE IF NOT EXISTS server_snapshots (
+			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			total_users   INT NOT NULL DEFAULT 0,
+			total_posts   INT NOT NULL DEFAULT 0,
+			total_follows INT NOT NULL DEFAULT 0,
+			captured_at   TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// Drop FK constraints on messages so cross-server messages can be stored.
+		// Remote senders are not in the local identities table → FK violation on insert.
+		`ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_sender_fkey;`,
+		`ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_receiver_fkey;`,
+
+		// Indexes for efficient conversation lookups
+		`CREATE INDEX IF NOT EXISTS idx_messages_sender_receiver ON messages(sender, receiver);`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver);`,
+
+		// Drop FK constraints on follows so cross-server follow rows can be stored.
+		// When Server A follows Server B user, the followee_user_id (bob@server_b)
+		// is not in server_a's identities table, and vice-versa on server_b.
+		`ALTER TABLE follows DROP CONSTRAINT IF EXISTS follows_follower_user_id_fkey;`,
+		`ALTER TABLE follows DROP CONSTRAINT IF EXISTS follows_followee_user_id_fkey;`,
+
+		// ── server_config ─────────────────────────────────────────────────────────
+		// Used by admin to store server name and other runtime settings.
+		// MISSING from original migrations — caused GetServerConfig() to fail with
+		// "relation server_config does not exist", returning 500 on /admin/config/server.
+		`CREATE TABLE IF NOT EXISTS server_config (
+			key        TEXT PRIMARY KEY,
+			value      TEXT NOT NULL,
+			updated_by TEXT,
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// Insert a blank placeholder row — SeedServerConfig() (called from main)
+		// will UPSERT the correct value from the SERVER_NAME env var.
+		`INSERT INTO server_config (key, value, updated_by, updated_at)
+		 VALUES ('server_name', '', 'system', NOW())
+		 ON CONFLICT (key) DO NOTHING;`,
+
+		// ── Reports (moderation package) ─────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS reports (
+			id           BIGSERIAL PRIMARY KEY,
+			reporter_id  TEXT NOT NULL,
+			target_ref   TEXT NOT NULL,
+			target_server TEXT,
+			reason       TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'PENDING',
+			created_at   TIMESTAMP DEFAULT NOW(),
+			resolved_at  TIMESTAMP,
+			resolved_by  TEXT
+		);`,
+
+		// ── Blocked servers (moderation package) ─────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS blocked_servers (
+			id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			server_url  TEXT NOT NULL UNIQUE,
+			reason      TEXT,
+			blocked_by  TEXT,
+			blocked_at  TIMESTAMP DEFAULT NOW(),
+			is_active   BOOLEAN DEFAULT TRUE,
+			created_at  TIMESTAMP DEFAULT NOW(),
+			updated_at  TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// ── User blocks (moderation package) ─────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS user_blocks (
+			id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			blocker_user_id TEXT NOT NULL,
+			blocked_user_id TEXT NOT NULL,
+			reason          TEXT,
+			expires_at      TIMESTAMP,
+			is_active       BOOLEAN DEFAULT TRUE,
+			created_at      TIMESTAMP DEFAULT NOW(),
+			UNIQUE (blocker_user_id, blocked_user_id)
+		);`,
+
+		// ── Federation events queue (moderation package) ──────────────────────────
+		`CREATE TABLE IF NOT EXISTS federation_events (
+			id            BIGSERIAL PRIMARY KEY,
+			event_type    TEXT NOT NULL,
+			target_server TEXT NOT NULL,
+			payload       JSONB NOT NULL DEFAULT '{}',
+			retry_count   INT NOT NULL DEFAULT 0,
+			last_tried_at TIMESTAMP,
+			created_at    TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// ── Backup metadata (moderation package) ─────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS backup_metadata (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			location   TEXT NOT NULL,
+			created_by TEXT,
+			created_at TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// ── Invites system ────────────────────────────────────────────────────────
+		// Required by invites.go; was MISSING from migrations — caused
+		// "ERR > Failed to fetch invites" on admin dashboard.
+		`CREATE TABLE IF NOT EXISTS invites (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			invite_code  TEXT NOT NULL UNIQUE,
+			invite_type  TEXT NOT NULL DEFAULT 'user',
+			created_by   TEXT NOT NULL,
+			max_uses     INT NOT NULL DEFAULT 1,
+			current_uses INT NOT NULL DEFAULT 0,
+			expires_at   TIMESTAMP,
+			revoked      BOOLEAN NOT NULL DEFAULT FALSE,
+			metadata     TEXT,
+			created_at   TIMESTAMP DEFAULT NOW()
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS invite_usage (
+			id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			invite_id   UUID NOT NULL REFERENCES invites(id) ON DELETE CASCADE,
+			user_id     TEXT NOT NULL,
+			ip_address  TEXT,
+			user_agent  TEXT,
+			used_at     TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// ── Server identity (full schema) ─────────────────────────────────────────
+		// init.go InsertServer uses: server_id, server_name, public_key, private_key_encrypted
+		// init.go CheckInitializationStatus uses: initialized
+		// invites QR uses: server_id, server_name, public_key, endpoint
+		`CREATE TABLE IF NOT EXISTS server_identity (
+			id                    INT PRIMARY KEY DEFAULT 1,
+			server_id             TEXT NOT NULL DEFAULT '',
+			server_name           TEXT NOT NULL DEFAULT '',
+			public_key            TEXT NOT NULL DEFAULT '',
+			private_key           TEXT,
+			private_key_encrypted TEXT,
+			endpoint              TEXT NOT NULL DEFAULT '',
+			initialized           BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at            TIMESTAMP DEFAULT NOW(),
+			updated_at            TIMESTAMP DEFAULT NOW(),
+			CONSTRAINT server_identity_singleton CHECK (id = 1)
+		);`,
+
+		// Add missing columns to existing server_identity rows (idempotent)
+		`ALTER TABLE server_identity ADD COLUMN IF NOT EXISTS initialized           BOOLEAN NOT NULL DEFAULT FALSE;`,
+		`ALTER TABLE server_identity ADD COLUMN IF NOT EXISTS private_key           TEXT;`,
+		`ALTER TABLE server_identity ADD COLUMN IF NOT EXISTS private_key_encrypted TEXT;`,
+		`ALTER TABLE server_identity ADD COLUMN IF NOT EXISTS endpoint              TEXT NOT NULL DEFAULT '';`,
+
+		// Ensure a default row exists for server_identity (singleton pattern)
+		`INSERT INTO server_identity (id, server_id, server_name, public_key, endpoint, initialized)
+		 VALUES (1, '', '', '', '', FALSE)
+		 ON CONFLICT (id) DO NOTHING;`,
+
+		// ── Admins table ──────────────────────────────────────────────────────────
+		// Used by InitializeServer (init.go) to create the first admin account.
+		// MISSING from migrations — caused InsertServer to fail on the admins INSERT.
+		`CREATE TABLE IF NOT EXISTS admins (
+			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			username       TEXT NOT NULL UNIQUE,
+			password_hash  TEXT NOT NULL,
+			is_super_admin BOOLEAN NOT NULL DEFAULT FALSE,
+			created_by     UUID,
+			created_at     TIMESTAMP DEFAULT NOW(),
+			updated_at     TIMESTAMP DEFAULT NOW()
+		);`,
+
+		// ── Moderator roles table ─────────────────────────────────────────────────
+		// Used by ModeratorAuthMiddleware, AssignModeratorHandler, ListModeratorsHandler.
+		// MISSING from migrations — caused all moderator route lookups to fail.
+		`CREATE TABLE IF NOT EXISTS moderator_roles (
+			user_id     TEXT PRIMARY KEY,
+			username    TEXT NOT NULL DEFAULT '',
+			assigned_by TEXT NOT NULL DEFAULT 'admin',
+			assigned_at TIMESTAMP DEFAULT NOW()
+		);`,
 	}
 
 	for _, schema := range schemas {

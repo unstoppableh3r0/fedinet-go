@@ -9,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/unstoppableh3r0/fedinet-go/internal/identity"
+	"github.com/unstoppableh3r0/fedinet-go/internal/privacy"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -190,6 +191,30 @@ func main() {
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
+
+	// Epic 3 Privacy & Security
+	mux.HandleFunc("/privacy/keys/exchange", privacy.ExchangeKeysHandler)
+	mux.HandleFunc("/privacy/message/encrypt", privacy.EncryptMessageHandler)
+	mux.HandleFunc("/privacy/post/visibility", privacy.SetPostVisibilityHandler)
+	mux.HandleFunc("/privacy/post/share-restricted", privacy.ShareRestrictedHandler)
+	mux.HandleFunc("/privacy/attachment/encrypt", privacy.EncryptAttachmentHandler)
+	mux.HandleFunc("/privacy/post/anonymous", privacy.AnonymousPostHandler)
+	mux.HandleFunc("/privacy/post/warning", privacy.ContentWarningHandler)
+	mux.HandleFunc("/privacy/post/acl", privacy.PostACLHandler)
+	mux.HandleFunc("/privacy/block/mutual", privacy.MutualBlockHandler)
+	mux.HandleFunc("/privacy/post/disable-forward", privacy.DisableForwardHandler)
+	mux.HandleFunc("/privacy/group/keys", privacy.GroupKeyHandler)
+	mux.Handle("/admin/privacy/audit-logs", identity.AdminAuthMiddleware(http.HandlerFunc(privacy.AuditLogHandler)))
+	mux.Handle("/admin/privacy/settings", identity.AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut || r.Method == http.MethodPost {
+			privacy.UpdateEncryptionSettingsHandler(w, r)
+		} else {
+			privacy.GetEncryptionSettingsHandler(w, r)
+		}
+	})))
+	mux.HandleFunc("/privacy/zkp/verify", privacy.ZKPVerifyHandler)
+	mux.HandleFunc("/privacy/network/proxy-enable", privacy.NetworkProxyHandler)
+	mux.HandleFunc("/privacy/post/expire", privacy.ExpirePostHandler)
 
 	handler := corsMiddleware(mux)
 

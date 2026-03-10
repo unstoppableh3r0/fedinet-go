@@ -458,9 +458,9 @@ func ApplyMigrations() {
 		`ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_sender_fkey;`,
 		`ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_receiver_fkey;`,
 
-		// Indexes for efficient conversation lookups
-		`CREATE INDEX IF NOT EXISTS idx_messages_sender_receiver ON messages(sender, receiver);`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver);`,
+		// Indexes for efficient conversation lookups (using correct renamed columns)
+		`CREATE INDEX IF NOT EXISTS idx_messages_sender_id_recipient_id ON messages(sender_id, recipient_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_recipient_id ON messages(recipient_id);`,
 
 		// Drop FK constraints on follows so cross-server follow rows can be stored.
 		// When Server A follows Server B user, the followee_user_id (bob@server_b)

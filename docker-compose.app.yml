@@ -1,0 +1,102 @@
+version: "3.9"
+
+# Full-stack docker compose for FedNet
+# Runs: postgres + ml-service + identity backend (port 8082) + frontend (port 3000)
+#
+# Usage:
+#   docker-compose -f docker-compose.app.yml up --build
+#
+# .env file (copy from .env.example and fill in):
+#   DATABASE_URL, SERVER_ID, SERVER_NAME, SERVER_URL, JWT_SECRET,
+#   AI_MODERATION_API_KEY, SERVER_IDENTITY_PRIVATE_KEY
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: fedinet_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fedinet_server_a
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── ML Moderation Service ─────────────────────────────────────────────────
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: ml-service
+    ports:
+      - "8090:8090"
+    environment:
+      API_KEY: ${AI_MODERATION_API_KEY:-changeme}
+      PORT: 8090
+      FEEDBACK_FILE: /data/feedback.jsonl
+    volumes:
+      - ml_feedback:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── Identity / API Backend ────────────────────────────────────────────────
+  identity:
+    build:
+      context: .
+      dockerfile: internal/identity/Dockerfile
+    container_name: fedinet_identity
+    ports:
+      - "8082:8082"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_a?sslmode=disable
+      SERVER_ID: ${SERVER_ID:-server_a}
+      SERVER_NAME: ${SERVER_NAME:-Server A}
+      SERVER_URL: ${SERVER_URL:-http://localhost:8082}
+      SERVER_ENDPOINT: ${SERVER_URL:-http://localhost:8082}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      AI_MODERATION_API_URL: http://ml-service:8090/moderate
+      AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
+      SERVER_IDENTITY_PRIVATE_KEY: ${SERVER_IDENTITY_PRIVATE_KEY:-}
+      SERVER_MASTER_KEY: ${SERVER_MASTER_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Next.js Frontend ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../federated-frontend
+      dockerfile: DockerFile
+    container_name: fedinet_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_SERVER_URL: ${SERVER_URL:-http://localhost:8082}
+      NODE_ENV: development
+    depends_on:
+      identity:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ml_feedback:

@@ -94,8 +94,25 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Local message - use existing logic
-	if err := SendMessage(ToInternalID(req.From), ToInternalID(req.To), req.Content, req.ImageURL); err != nil {
+	// Local message: require that at least one side follows the other
+	internalFrom := ToInternalID(req.From)
+	internalTo := ToInternalID(req.To)
+
+	var canMessage bool
+	_ = db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM follows
+			WHERE (follower_user_id = $1 AND followee_user_id = $2)
+			   OR (follower_user_id = $2 AND followee_user_id = $1)
+		)
+	`, internalFrom, internalTo).Scan(&canMessage)
+
+	if !canMessage {
+		RespondWithError(w, http.StatusForbidden, "you must follow this user to send them a message")
+		return
+	}
+
+	if err := SendMessage(internalFrom, internalTo, req.Content, req.ImageURL); err != nil {
 		RespondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

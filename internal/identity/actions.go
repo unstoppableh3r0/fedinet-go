@@ -38,8 +38,9 @@ func FollowUser(followerID, followeeID string) error {
 	// Invalidate cache immediately so the updated lists are visible right away.
 	invalidateFollowCaches(followerID, followeeID)
 
-	if err := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); err != nil {
-		return err
+	// Non-fatal: log activity and create notification — don't block follow on these
+	if logErr := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); logErr != nil {
+		log.Printf("Warning: failed to log follow activity: %v", logErr)
 	}
 
 	// Propagate the follow relationship to the remote server's DB so their
@@ -48,7 +49,10 @@ func FollowUser(followerID, followeeID string) error {
 		go DeliverFederatedFollow(followerID, followeeID, "follow")
 	}
 
-	return CreateNotification(followeeID, followerID, "FOLLOW", followeeID)
+	if notifErr := CreateNotification(followeeID, followerID, "FOLLOW", followeeID); notifErr != nil {
+		log.Printf("Warning: failed to create follow notification: %v", notifErr)
+	}
+	return nil
 }
 
 func UnfollowUser(followerID, followeeID string) error {
@@ -569,7 +573,7 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted,
 			p.image_url
 		FROM posts p
-		WHERE p.author = $1 AND p.visibility = 'PUBLIC'
+		WHERE p.author = $1 AND UPPER(p.visibility) = 'PUBLIC'
 		ORDER BY p.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
@@ -616,7 +620,7 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
 			p.image_url
 		FROM posts p
-		WHERE p.visibility = 'PUBLIC'
+		WHERE UPPER(p.visibility) = 'PUBLIC'
 		ORDER BY p.created_at DESC
 		LIMIT $2
 	`

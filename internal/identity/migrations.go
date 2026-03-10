@@ -453,6 +453,9 @@ func ApplyMigrations() {
 			succeeded    BOOLEAN      NOT NULL DEFAULT FALSE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_recovery_attempts_user_time ON passkey_recovery_attempts(user_id, attempted_at)`,
+
+		// Group join policy: anyone, followers, invite_only (default)
+		`ALTER TABLE group_chats ADD COLUMN IF NOT EXISTS join_policy TEXT NOT NULL DEFAULT 'invite_only'`,
 	}
 
 	for _, schema := range schemas {

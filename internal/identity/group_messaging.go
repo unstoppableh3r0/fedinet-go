@@ -570,3 +570,232 @@ func GetGroupMessagesHandler(w http.ResponseWriter, r *http.Request) {
 
 	RespondWithJSON(w, http.StatusOK, messages)
 }
+
+// LeaveGroupHandler lets any member remove themselves from a group.
+// Unlike RemoveGroupMemberHandler (admin-only), any member can call this.
+// The last admin cannot leave — they must promote someone else first.
+//
+// POST /groups/leave
+// Headers: Authorization: Bearer <token>
+// Body:    {"group_id":"..."}
+func LeaveGroupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, ok := requireGroupAuth(w, r)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		GroupID string `json:"group_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.GroupID == "" {
+		RespondWithError(w, http.StatusBadRequest, "group_id required")
+		return
+	}
+
+	member, err := isGroupMember(req.GroupID, userID)
+	if err != nil || !member {
+		RespondWithError(w, http.StatusForbidden, "not a member of this group")
+		return
+	}
+
+	// Prevent the last admin from leaving.
+	isAdmin, _ := isGroupAdmin(req.GroupID, userID)
+	if isAdmin {
+		var adminCount int
+		_ = db.QueryRow(
+			`SELECT COUNT(*) FROM group_members WHERE group_id=$1 AND role='admin'`, req.GroupID,
+		).Scan(&adminCount)
+		if adminCount <= 1 {
+			RespondWithError(w, http.StatusConflict,
+				"you are the only admin; promote another member before leaving")
+			return
+		}
+	}
+
+	if _, err := db.Exec(
+		`DELETE FROM group_members WHERE group_id=$1 AND user_id=$2`, req.GroupID, userID,
+	); err != nil {
+		RespondWithError(w, http.StatusInternalServerError, "failed to leave group")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "left group"})
+}
+
+// UpdateGroupJoinPolicyHandler changes a group's join policy (admin only).
+// Supported policies: "anyone", "followers", "invite_only"
+//
+// POST /groups/policy
+// Headers: Authorization: Bearer <token>
+// Body:    {"group_id":"...","join_policy":"anyone"}
+func UpdateGroupJoinPolicyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, ok := requireGroupAuth(w, r)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		GroupID    string `json:"group_id"`
+		JoinPolicy string `json:"join_policy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.GroupID == "" {
+		RespondWithError(w, http.StatusBadRequest, "group_id required")
+		return
+	}
+
+	switch req.JoinPolicy {
+	case "anyone", "followers", "invite_only":
+	default:
+		RespondWithError(w, http.StatusBadRequest, "join_policy must be 'anyone', 'followers', or 'invite_only'")
+		return
+	}
+
+	if admin, err := isGroupAdmin(req.GroupID, userID); err != nil || !admin {
+		RespondWithError(w, http.StatusForbidden, "only group admins can change join policy")
+		return
+	}
+
+	if _, err := db.Exec(
+		`UPDATE group_chats SET join_policy=$1 WHERE id=$2`, req.JoinPolicy, req.GroupID,
+	); err != nil {
+		log.Printf("UpdateGroupJoinPolicy: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to update join policy")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"join_policy": req.JoinPolicy})
+}
+
+// JoinGroupHandler lets a user join a group based on its join_policy.
+//   - "anyone"      — any authenticated user may join
+//   - "followers"   — the caller must follow the group creator
+//   - "invite_only" — rejected; only admins can add members
+//
+// POST /groups/join
+// Headers: Authorization: Bearer <token>
+// Body:    {"group_id":"..."}
+func JoinGroupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, ok := requireGroupAuth(w, r)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		GroupID string `json:"group_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.GroupID == "" {
+		RespondWithError(w, http.StatusBadRequest, "group_id required")
+		return
+	}
+
+	// Already a member?
+	if member, err := isGroupMember(req.GroupID, userID); err == nil && member {
+		RespondWithError(w, http.StatusConflict, "already a member")
+		return
+	}
+
+	var joinPolicy, createdBy string
+	if err := db.QueryRow(
+		`SELECT COALESCE(join_policy,'invite_only'), created_by FROM group_chats WHERE id=$1`, req.GroupID,
+	).Scan(&joinPolicy, &createdBy); err != nil {
+		if err == sql.ErrNoRows {
+			RespondWithError(w, http.StatusNotFound, "group not found")
+		} else {
+			RespondWithError(w, http.StatusInternalServerError, "db error")
+		}
+		return
+	}
+
+	switch joinPolicy {
+	case "invite_only":
+		RespondWithError(w, http.StatusForbidden, "this group requires an invitation to join")
+		return
+	case "followers":
+		// Caller must be following the group creator.
+		var follows bool
+		_ = db.QueryRow(
+			`SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2)`,
+			userID, createdBy,
+		).Scan(&follows)
+		if !follows {
+			RespondWithError(w, http.StatusForbidden, "you must follow the group creator to join")
+			return
+		}
+	}
+
+	// "anyone" or follower check passed — add as member.
+	if _, err := db.Exec(
+		`INSERT INTO group_members (group_id, user_id, role) VALUES ($1,$2,'member') ON CONFLICT DO NOTHING`,
+		req.GroupID, userID,
+	); err != nil {
+		log.Printf("JoinGroup: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to join group")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusCreated, map[string]string{"message": "joined group"})
+}
+
+// ListPublicGroupsHandler returns groups with join_policy != 'invite_only'
+// so users can discover and join open groups.
+//
+// GET /groups/public
+// Headers: Authorization: Bearer <token>
+func ListPublicGroupsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, ok := requireGroupAuth(w, r)
+	if !ok {
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT gc.id, gc.name, gc.created_by, gc.join_policy, gc.created_at,
+		       (SELECT COUNT(*) FROM group_members WHERE group_id = gc.id) AS member_count
+		FROM group_chats gc
+		WHERE gc.join_policy != 'invite_only'
+		  AND NOT EXISTS (SELECT 1 FROM group_members WHERE group_id=gc.id AND user_id=$1)
+		ORDER BY member_count DESC, gc.created_at DESC
+		LIMIT 50
+	`, userID)
+	if err != nil {
+		RespondWithError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+
+	type entry struct {
+		ID          string    `json:"id"`
+		Name        string    `json:"name"`
+		CreatedBy   string    `json:"created_by"`
+		JoinPolicy  string    `json:"join_policy"`
+		CreatedAt   time.Time `json:"created_at"`
+		MemberCount int       `json:"member_count"`
+	}
+	var groups []entry
+	for rows.Next() {
+		var g entry
+		if err := rows.Scan(&g.ID, &g.Name, &g.CreatedBy, &g.JoinPolicy, &g.CreatedAt, &g.MemberCount); err != nil {
+			continue
+		}
+		groups = append(groups, g)
+	}
+	if groups == nil {
+		groups = []entry{}
+	}
+	RespondWithJSON(w, http.StatusOK, groups)
+}

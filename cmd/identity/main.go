@@ -188,9 +188,13 @@ func main() {
 	// Encrypted group messaging
 	mux.Handle("/groups/create", rlWrite(http.HandlerFunc(identity.CreateGroupHandler)))
 	mux.Handle("/groups", rlRead(http.HandlerFunc(identity.ListGroupsHandler)))
+	mux.Handle("/groups/public", rlRead(http.HandlerFunc(identity.ListPublicGroupsHandler)))
 	mux.Handle("/groups/members", rlRead(http.HandlerFunc(identity.GetGroupMembersHandler)))
 	mux.Handle("/groups/members/add", rlWrite(http.HandlerFunc(identity.AddGroupMemberHandler)))
 	mux.Handle("/groups/members/remove", rlWrite(http.HandlerFunc(identity.RemoveGroupMemberHandler)))
+	mux.Handle("/groups/leave", rlWrite(http.HandlerFunc(identity.LeaveGroupHandler)))
+	mux.Handle("/groups/join", rlWrite(http.HandlerFunc(identity.JoinGroupHandler)))
+	mux.Handle("/groups/policy", rlWrite(http.HandlerFunc(identity.UpdateGroupJoinPolicyHandler)))
 	mux.Handle("/groups/message", rlWrite(http.HandlerFunc(identity.SendGroupMessageHandler)))
 	mux.Handle("/groups/messages", rlRead(http.HandlerFunc(identity.GetGroupMessagesHandler)))
 

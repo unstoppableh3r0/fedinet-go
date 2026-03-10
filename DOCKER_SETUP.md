@@ -152,6 +152,10 @@ Get-Content .\internal\identity\migrations\011_post_visibility.sql | docker exec
 Get-Content .\internal\identity\migrations\012_passkeys.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\identity\migrations\012_passkeys.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 
+# 013 — TOTP backup recovery codes
+Get-Content .\internal\identity\migrations\013_totp_backup_codes.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\013_totp_backup_codes.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
 # Federation tables
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b

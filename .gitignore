@@ -5,12 +5,12 @@
 *.dylib
 
 # Build output — compiled service binaries (go build ...)
-federation
-identity
-identity_service
-fedinet-backend
-signtest
-main
+/federation
+/identity
+/identity_service
+/fedinet-backend
+/signtest
+/main
 
 # Test binary, built with `go test -c`
 *.test

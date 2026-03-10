@@ -58,7 +58,9 @@ services:
       AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
       # WebAuthn / Passkey settings
       WEBAUTHN_RPID: localhost
-      WEBAUTHN_ORIGIN: http://localhost:3000
+      WEBAUTHN_ORIGIN: "http://localhost:3000,http://localhost:3001,http://localhost:3002"
+      # TOTP encryption key (dev only — change in production)
+      SERVER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,7 +110,9 @@ services:
       AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
       # WebAuthn / Passkey settings
       WEBAUTHN_RPID: localhost
-      WEBAUTHN_ORIGIN: http://localhost:3000
+      WEBAUTHN_ORIGIN: "http://localhost:3000,http://localhost:3001,http://localhost:3002"
+      # TOTP encryption key (dev only — change in production)
+      SERVER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
     depends_on:
       postgres:
         condition: service_healthy

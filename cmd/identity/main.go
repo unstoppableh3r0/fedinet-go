@@ -99,12 +99,16 @@ func main() {
 	mux.HandleFunc("/refresh-token", identity.RefreshTokenHandler)
 	mux.HandleFunc("/recover", identity.RecoverAccountHandler)
 
-	// TOTP / Authenticator-app key protection
-	mux.HandleFunc("/totp/setup", identity.TOTPSetupHandler)
-	mux.HandleFunc("/totp/enable", identity.TOTPEnableHandler)
-	mux.HandleFunc("/totp/status", identity.TOTPStatusHandler)
-	mux.HandleFunc("/totp/verify", identity.TOTPVerifyHandler)
-	mux.HandleFunc("/totp/disable", identity.TOTPDisableHandler)
+	// TOTP / Authenticator-app key protection (all auth endpoints are rate-limited)
+	mux.Handle("/totp/setup", rlAuth(http.HandlerFunc(identity.TOTPSetupHandler)))
+	mux.Handle("/totp/enable", rlAuth(http.HandlerFunc(identity.TOTPEnableHandler)))
+	mux.Handle("/totp/status", rlRead(http.HandlerFunc(identity.TOTPStatusHandler)))
+	mux.Handle("/totp/verify", rlAuth(http.HandlerFunc(identity.TOTPVerifyHandler)))
+	mux.Handle("/totp/disable", rlAuth(http.HandlerFunc(identity.TOTPDisableHandler)))
+	// Backup recovery codes
+	mux.Handle("/totp/backup-codes/generate", rlAuth(http.HandlerFunc(identity.TOTPGenerateBackupCodesHandler)))
+	mux.Handle("/totp/backup-codes/count", rlRead(http.HandlerFunc(identity.TOTPBackupCodesCountHandler)))
+	mux.Handle("/login/totp/backup", rlAuth(http.HandlerFunc(identity.LoginTOTPBackupHandler)))
 
 	// Passkeys (WebAuthn) — passwordless primary login
 	// Enroll (requires JWT)

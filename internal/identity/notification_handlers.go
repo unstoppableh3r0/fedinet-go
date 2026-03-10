@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -66,7 +67,9 @@ func GetNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		if displayName != nil {
 			n.ActorName = *displayName
 		} else {
-			n.ActorName = n.Actor
+			// Fall back to just the username portion (before '@'), not the full federated ID
+			parts := strings.SplitN(n.Actor, "@", 2)
+			n.ActorName = parts[0]
 		}
 		if avatarURL != nil {
 			n.ActorAvatar = *avatarURL

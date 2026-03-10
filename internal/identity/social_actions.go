@@ -40,7 +40,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 			p.origin_post,
 			p.origin_server
 		FROM (
-			SELECT DISTINCT ON (COALESCE(p2.group_id, p2.id))
+			SELECT DISTINCT ON (COALESCE(p2.group_id, p2.id::text))
 				p2.*
 			FROM posts p2
 			WHERE p2.visibility = 'PUBLIC'
@@ -50,7 +50,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 			  )
 			  AND (p2.expires_at IS NULL OR p2.expires_at > NOW())
 			ORDER BY
-				COALESCE(p2.group_id, p2.id),
+				COALESCE(p2.group_id, p2.id::text),
 				-- prefer local origin replica; fall back to earliest created
 				CASE WHEN p2.origin_server = $4 OR p2.origin_server IS NULL THEN 0 ELSE 1 END,
 				p2.created_at ASC

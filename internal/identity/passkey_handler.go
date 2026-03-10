@@ -142,7 +142,7 @@ func loadWAUser(userID string) (*waUser, error) {
 	}
 
 	rows, err := db.Query(
-		`SELECT credential_id, public_key, sign_count FROM passkeys WHERE user_id = $1`,
+		`SELECT credential_id, public_key, sign_count, backup_eligible, backup_state FROM passkeys WHERE user_id = $1`,
 		userID,
 	)
 	if err != nil {
@@ -154,10 +154,15 @@ func loadWAUser(userID string) (*waUser, error) {
 	for rows.Next() {
 		var cid, pk []byte
 		var sc uint32
-		if err2 := rows.Scan(&cid, &pk, &sc); err2 == nil {
+		var backupEligible, backupState bool
+		if err2 := rows.Scan(&cid, &pk, &sc, &backupEligible, &backupState); err2 == nil {
 			creds = append(creds, webauthn.Credential{
 				ID:        cid,
 				PublicKey: pk,
+				Flags: webauthn.CredentialFlags{
+					BackupEligible: backupEligible,
+					BackupState:    backupState,
+				},
 				Authenticator: webauthn.Authenticator{
 					SignCount: sc,
 				},
@@ -260,10 +265,15 @@ func PasskeyRegisterCompleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.Exec(`
-		INSERT INTO passkeys (user_id, credential_id, public_key, sign_count, aaguid)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (credential_id) DO UPDATE SET sign_count = EXCLUDED.sign_count
-	`, userID, cred.ID, cred.PublicKey, cred.Authenticator.SignCount, hex.EncodeToString(cred.Authenticator.AAGUID[:]))
+		INSERT INTO passkeys (user_id, credential_id, public_key, sign_count, aaguid, backup_eligible, backup_state)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (credential_id) DO UPDATE
+			SET sign_count       = EXCLUDED.sign_count,
+			    backup_eligible  = EXCLUDED.backup_eligible,
+			    backup_state     = EXCLUDED.backup_state
+	`, userID, cred.ID, cred.PublicKey, cred.Authenticator.SignCount,
+		hex.EncodeToString(cred.Authenticator.AAGUID[:]),
+		cred.Flags.BackupEligible, cred.Flags.BackupState)
 	if err != nil {
 		log.Printf("Passkey store error: %v", err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to save passkey")
@@ -360,10 +370,10 @@ func PasskeyLoginCompleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update sign count to detect cloned authenticators
+	// Update sign count (clone detection) and backup state (can change per-session)
 	if _, dbErr := db.Exec(
-		`UPDATE passkeys SET sign_count = $1 WHERE credential_id = $2`,
-		cred.Authenticator.SignCount, cred.ID,
+		`UPDATE passkeys SET sign_count = $1, backup_eligible = $2, backup_state = $3 WHERE credential_id = $4`,
+		cred.Authenticator.SignCount, cred.Flags.BackupEligible, cred.Flags.BackupState, cred.ID,
 	); dbErr != nil {
 		log.Printf("sign_count update error: %v", dbErr)
 	}

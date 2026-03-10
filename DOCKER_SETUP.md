@@ -156,6 +156,10 @@ Get-Content .\internal\identity\migrations\012_passkeys.sql | docker exec -i fed
 Get-Content .\internal\identity\migrations\013_totp_backup_codes.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\identity\migrations\013_totp_backup_codes.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 
+# 014 — Passkey BackupEligible/BackupState flags (fixes go-webauthn v0.10+ login check)
+Get-Content .\internal\identity\migrations\014_passkey_flags.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\014_passkey_flags.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
 # Federation tables
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
@@ -464,5 +468,6 @@ docker exec -it fedinet_postgres psql -U postgres -d fedinet_server_a
 | `internal/identity/migrations/011_post_visibility.sql` | Post visibility settings |
 | `internal/identity/migrations/012_passkeys.sql` | WebAuthn passkeys + recovery attempts |
 | `internal/identity/migrations/013_totp_backup_codes.sql` | TOTP backup recovery codes (single-use, hashed) |
+| `internal/identity/migrations/014_passkey_flags.sql` | Passkey BackupEligible/BackupState flags (fixes go-webauthn v0.16 login check) |
 | `internal/federation/migrations.sql` | Federation-specific tables |
 | `internal/federation/012_fix_delivery_attempts_fk.sql` | Fix `delivery_attempts` FK → `outbox_activities` |

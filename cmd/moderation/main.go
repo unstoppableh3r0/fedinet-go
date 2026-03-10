@@ -8,6 +8,21 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/internal/moderation"
 )
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 
 	// Load .env
@@ -33,5 +48,5 @@ func main() {
 
 	log.Println("🚀 Moderation service running on :8090")
 
-	log.Fatal(http.ListenAndServe(":8090", mux))
+	log.Fatal(http.ListenAndServe(":8090", corsMiddleware(mux)))
 }

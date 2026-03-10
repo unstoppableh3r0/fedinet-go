@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
 type Handler struct {
@@ -59,6 +61,9 @@ func (h *Handler) ListPendingReports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if reports == nil {
+		reports = []models.Report{}
+	}
 	json.NewEncoder(w).Encode(reports)
 }
 

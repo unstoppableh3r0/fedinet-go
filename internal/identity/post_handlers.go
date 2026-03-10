@@ -258,6 +258,13 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 	originPostPtr = &postID
 	_ = SetPostOrigin(postID, postID)
 
+	// Log the post activity so admin dashboard counters stay accurate.
+	go func() {
+		if logErr := LogActivity(internalUserID, "POST", "post", postID, "", ""); logErr != nil {
+			log.Printf("CreatePostHandler: LogActivity: %v", logErr)
+		}
+	}()
+
 	// Ensure that if the post is hidden we explicitly inform the frontend gracefully
 	if visibility == "HIDDEN" {
 		// ⭐ Notify the author that their post is under review

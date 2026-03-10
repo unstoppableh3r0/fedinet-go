@@ -218,6 +218,8 @@ func main() {
 	mux.Handle("/federation/follow", rlFed(http.HandlerFunc(identity.HandleIncomingFederatedFollow)))
 	// Multi-server linked posting
 	mux.Handle("/federation/linked-post", rlFed(http.HandlerFunc(identity.HandleLinkedPostHandler)))
+	// Capabilities endpoint so peer servers can discover linked_posts support
+	mux.HandleFunc("/federation/capabilities", identity.ServerCapabilitiesHandler)
 	mux.Handle("/federation/propagate-edit", rlFed(http.HandlerFunc(identity.PropagateEditHandler)))
 	// Cross-server feed slices
 	mux.Handle("/federation/feed-slice", rlFed(http.HandlerFunc(identity.HandleFeedSliceHandler)))

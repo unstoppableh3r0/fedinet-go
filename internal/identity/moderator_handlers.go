@@ -335,9 +335,9 @@ func ListModeratorsHandler(w http.ResponseWriter, r *http.Request) {
 func GetSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 30
 	rows, err := db.Query(`
-		SELECT id, total_users, total_posts, total_follows, created_at
+		SELECT total_users, total_posts, total_activities, total_follows, created_at
 		FROM server_stats_snapshots
-		ORDER BY created_at DESC
+		ORDER BY created_at ASC
 		LIMIT $1
 	`, limit)
 	if err != nil {
@@ -347,21 +347,24 @@ func GetSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	// Use field names that match the admin frontend's AdminSnapshot interface.
 	type Snapshot struct {
-		ID           int64     `json:"id"`
-		TotalUsers   int       `json:"total_users"`
-		TotalPosts   int       `json:"total_posts"`
-		TotalFollows int       `json:"total_follows"`
-		CreatedAt    time.Time `json:"created_at"`
+		TS         int64 `json:"ts"`
+		Users      int   `json:"users"`
+		Posts      int   `json:"posts"`
+		Activities int   `json:"activities"`
+		Follows    int   `json:"follows"`
 	}
 
 	var snapshots []Snapshot
 	for rows.Next() {
 		var s Snapshot
-		if err := rows.Scan(&s.ID, &s.TotalUsers, &s.TotalPosts, &s.TotalFollows, &s.CreatedAt); err != nil {
+		var createdAt time.Time
+		if err := rows.Scan(&s.Users, &s.Posts, &s.Activities, &s.Follows, &createdAt); err != nil {
 			log.Printf("GetSnapshotsHandler scan: %v", err)
 			continue
 		}
+		s.TS = createdAt.UnixMilli()
 		snapshots = append(snapshots, s)
 	}
 
@@ -375,8 +378,40 @@ func GetSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /admin/snapshots — capture current stats into the snapshots table
+// POST /admin/snapshots — save a stats snapshot.
+// The request body may contain {ts, users, posts, activities, follows} (from the
+// frontend seed). If the body is empty or unparseable the handler falls back to
+// computing live counts from the database.
 func SaveSnapshotHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TS         int64 `json:"ts"`
+		Users      int   `json:"users"`
+		Posts      int   `json:"posts"`
+		Activities int   `json:"activities"`
+		Follows    int   `json:"follows"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body) // ignore parse errors — fall through to DB compute
+
+	// If the body carried seed data (ts != 0), store it directly so the
+	// trend chart has a meaningful history from first boot.
+	if body.TS != 0 {
+		snappedAt := time.UnixMilli(body.TS)
+		var id int64
+		if err := db.QueryRow(`
+			INSERT INTO server_stats_snapshots
+				(total_users, total_posts, total_activities, total_follows, created_at)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id
+		`, body.Users, body.Posts, body.Activities, body.Follows, snappedAt).Scan(&id); err != nil {
+			log.Printf("SaveSnapshotHandler (seed): %v", err)
+			RespondWithError(w, http.StatusInternalServerError, "failed to save snapshot")
+			return
+		}
+		RespondWithJSON(w, http.StatusCreated, map[string]interface{}{"id": id, "message": "snapshot saved"})
+		return
+	}
+
+	// No seed body — compute live from DB.
 	stats, err := GetServerStats()
 	if err != nil {
 		log.Printf("SaveSnapshotHandler: GetServerStats: %v", err)
@@ -384,18 +419,13 @@ func SaveSnapshotHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var follows int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM follows`).Scan(&follows); err != nil {
-		log.Printf("SaveSnapshotHandler: follows count: %v", err)
-		// non-fatal — proceed with 0
-	}
-
 	var id int64
 	err = db.QueryRow(`
-		INSERT INTO server_stats_snapshots (total_users, total_posts, total_follows, created_at)
-		VALUES ($1, $2, $3, NOW())
+		INSERT INTO server_stats_snapshots
+			(total_users, total_posts, total_activities, total_follows, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
 		RETURNING id
-	`, stats.TotalUsers, stats.TotalPosts, follows).Scan(&id)
+	`, stats.TotalUsers, stats.TotalPosts, stats.TotalActivities, stats.TotalFollows).Scan(&id)
 	if err != nil {
 		log.Printf("SaveSnapshotHandler: insert: %v", err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to save snapshot")
@@ -403,11 +433,8 @@ func SaveSnapshotHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondWithJSON(w, http.StatusCreated, map[string]interface{}{
-		"id":            id,
-		"total_users":   stats.TotalUsers,
-		"total_posts":   stats.TotalPosts,
-		"total_follows": follows,
-		"message":       "snapshot saved",
+		"id":      id,
+		"message": "snapshot saved",
 	})
 }
 

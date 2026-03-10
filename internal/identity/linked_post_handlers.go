@@ -74,6 +74,18 @@ type capEntry struct {
 
 const capCacheTTL = 2 * time.Hour
 
+// ServerCapabilitiesHandler responds to GET /federation/capabilities so that
+// peer identity servers can discover what features this server supports.
+func ServerCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"linked_posts":      true,
+		"identity_vouching": true,
+		"encrypted_groups":  true,
+		"identity_graph":    true,
+	})
+}
+
 // RemoteServerSupportsLinkedPosts checks whether the remote server has
 // advertised the linked_posts capability. Results are cached for 2 hours.
 func RemoteServerSupportsLinkedPosts(serverURL string) bool {

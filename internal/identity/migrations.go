@@ -456,6 +456,12 @@ func ApplyMigrations() {
 
 		// Group join policy: anyone, followers, invite_only (default)
 		`ALTER TABLE group_chats ADD COLUMN IF NOT EXISTS join_policy TEXT NOT NULL DEFAULT 'invite_only'`,
+
+		// Expiring posts: allow posts to auto-delete after a set time
+		`ALTER TABLE posts ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`,
+
+		// Track activities count in admin dashboard trend chart
+		`ALTER TABLE server_stats_snapshots ADD COLUMN IF NOT EXISTS total_activities INT NOT NULL DEFAULT 0`,
 	}
 
 	for _, schema := range schemas {

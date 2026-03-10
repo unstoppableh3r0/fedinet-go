@@ -95,7 +95,17 @@ func MessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Local message - use existing logic
-	if err := SendMessage(ToInternalID(req.From), ToInternalID(req.To), req.Content, req.ImageURL); err != nil {
+	// Block check — do not allow messaging between blocked users.
+	internalFrom := ToInternalID(req.From)
+	internalTo := ToInternalID(req.To)
+	var msgBlocked bool
+	db.QueryRow(`SELECT EXISTS(SELECT 1 FROM block_events WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1))`,
+		internalFrom, internalTo).Scan(&msgBlocked) //nolint:errcheck
+	if msgBlocked {
+		RespondWithError(w, http.StatusForbidden, "cannot message a blocked user")
+		return
+	}
+	if err := SendMessage(internalFrom, internalTo, req.Content, req.ImageURL); err != nil {
 		RespondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

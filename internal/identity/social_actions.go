@@ -43,12 +43,24 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 			SELECT DISTINCT ON (COALESCE(p2.group_id, p2.id::text))
 				p2.*
 			FROM posts p2
-			WHERE p2.visibility = 'PUBLIC'
-			  AND (
+			WHERE (
 				p2.author IN (SELECT followee_user_id FROM follows WHERE follower_user_id = $1)
 				OR p2.author = $1
 			  )
+			  AND p2.visibility != 'HIDDEN'
 			  AND (p2.expires_at IS NULL OR p2.expires_at > NOW())
+			  AND (
+			    p2.author = $1
+			    OR p2.visibility = 'PUBLIC'
+			    OR (p2.visibility = 'FOLLOWERS' AND p2.author IN (
+			        SELECT followee_user_id FROM follows WHERE follower_user_id = $1
+			    ))
+			    OR (p2.visibility = 'CLOSE_FRIENDS' AND EXISTS(
+			        SELECT 1 FROM close_friends WHERE user_id = p2.author AND friend_id = $1
+			    ))
+			  )
+			  AND p2.author NOT IN (SELECT blocked_id FROM block_events WHERE blocker_id = $1)
+			  AND p2.author NOT IN (SELECT blocker_id FROM block_events WHERE blocked_id = $1)
 			ORDER BY
 				COALESCE(p2.group_id, p2.id::text),
 				-- prefer local origin replica; fall back to earliest created

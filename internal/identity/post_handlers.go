@@ -13,6 +13,51 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
+// canViewPost checks whether viewerID is allowed to interact with the given post.
+// It enforces visibility (PUBLIC / FOLLOWERS / CLOSE_FRIENDS) and mutual block rules.
+func canViewPost(viewerID, postID string) (bool, string) {
+	var authorID, visibility string
+	err := db.QueryRow("SELECT author, visibility FROM posts WHERE id = $1", postID).
+		Scan(&authorID, &visibility)
+	if err != nil {
+		return false, ""
+	}
+
+	// Author can always see their own posts.
+	if authorID == viewerID {
+		return true, authorID
+	}
+
+	// Block check — bidirectional.
+	var blocked bool
+	db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM block_events
+			WHERE (blocker_id = $1 AND blocked_id = $2)
+			   OR (blocker_id = $2 AND blocked_id = $1)
+		)`, viewerID, authorID).Scan(&blocked)
+	if blocked {
+		return false, authorID
+	}
+
+	switch visibility {
+	case "PUBLIC":
+		return true, authorID
+	case "FOLLOWERS":
+		var isFollower bool
+		db.QueryRow(`SELECT EXISTS(SELECT 1 FROM follows WHERE follower_user_id = $1 AND followee_user_id = $2)`,
+			viewerID, authorID).Scan(&isFollower)
+		return isFollower, authorID
+	case "CLOSE_FRIENDS":
+		var isCloseFriend bool
+		db.QueryRow(`SELECT EXISTS(SELECT 1 FROM close_friends WHERE user_id = $1 AND friend_id = $2)`,
+			authorID, viewerID).Scan(&isCloseFriend)
+		return isCloseFriend, authorID
+	default:
+		return false, authorID
+	}
+}
+
 // ToggleLikeHandler handles POST /post/like
 // Body: { "user_id": "...", "post_id": "..." }
 func ToggleLikeHandler(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +80,13 @@ func ToggleLikeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	internalUserID := ToInternalID(req.UserID)
+
+	// Enforce visibility — users can only like posts they can actually see.
+	if canSee, _ := canViewPost(internalUserID, req.PostID); !canSee {
+		RespondWithError(w, http.StatusForbidden, "post not accessible")
+		return
+	}
+
 	if err := ToggleLike(internalUserID, req.PostID); err != nil {
 		log.Printf("ToggleLike error for user %s post %s: %v", internalUserID, req.PostID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to toggle like")
@@ -73,11 +125,21 @@ func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 		internalUserID, req.PostID).Scan(&alreadyReposted)
 
 	if !alreadyReposted {
-		var authorID string
-		if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", req.PostID).Scan(&authorID); err != nil {
-			RespondWithError(w, http.StatusNotFound, "post not found")
+		// Visibility check — cannot repost what you cannot see.
+		canSee, authorID := canViewPost(internalUserID, req.PostID)
+		if !canSee {
+			RespondWithError(w, http.StatusForbidden, "post not accessible")
 			return
 		}
+
+		// Restricted-visibility posts must not be reposted (would leak content).
+		var vis string
+		db.QueryRow("SELECT visibility FROM posts WHERE id=$1", req.PostID).Scan(&vis)
+		if vis == "FOLLOWERS" || vis == "CLOSE_FRIENDS" {
+			RespondWithError(w, http.StatusForbidden, "cannot repost a restricted-visibility post")
+			return
+		}
+
 		var disableResharing bool
 		db.QueryRow("SELECT COALESCE(disable_resharing, false) FROM privacy_settings WHERE user_id=$1",
 			authorID).Scan(&disableResharing)

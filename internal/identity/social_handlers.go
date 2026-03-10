@@ -193,6 +193,14 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	internalUserID := ToInternalID(req.UserID)
+
+	// ⭐ STEP 0 — POST VISIBILITY CHECK: user must be able to see the post to reply.
+	if canSee, _ := canViewPost(internalUserID, req.PostID); !canSee {
+		RespondWithError(w, http.StatusForbidden, "post not accessible")
+		return
+	}
+
 	// ⭐ STEP A — AI MODERATION (skipped when moderation feature is disabled)
 	var aiResult *aimoderation.ModerationResponse
 	if IsModerationEnabled() {
@@ -212,7 +220,7 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	internalUserID := ToInternalID(req.UserID)
+	internalUserID = ToInternalID(req.UserID)
 
 	// ⭐ STEP B — FLAG: store flagged replies as HIDDEN so moderators can review them
 	if aiResult.Recommendation != "SAFE" {

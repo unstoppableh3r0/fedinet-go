@@ -25,6 +25,14 @@ func FollowUser(followerID, followeeID string) error {
 		}
 	}
 
+	// Block check — prevent following if either side has blocked the other.
+	var blocked bool
+	db.QueryRow(`SELECT EXISTS(SELECT 1 FROM block_events WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1))`,
+		followerID, followeeID).Scan(&blocked) //nolint:errcheck
+	if blocked {
+		return fmt.Errorf("cannot follow: user relationship is blocked")
+	}
+
 	_, err := db.Exec(
 		`INSERT INTO follows (follower_user_id, follower_home_server, followee_user_id, followee_home_server)
 		 VALUES ($1, $2, $3, $4)
@@ -609,6 +617,11 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 		        SELECT 1 FROM close_friends WHERE user_id = p.author AND friend_id = $2
 		    ))
 		  )
+		  AND NOT EXISTS(
+		    SELECT 1 FROM block_events
+		    WHERE (blocker_id = $2 AND blocked_id = p.author)
+		       OR (blocker_id = p.author AND blocked_id = $2)
+		  )
 		ORDER BY p.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
@@ -673,6 +686,8 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 		        SELECT 1 FROM close_friends WHERE user_id = p.author AND friend_id = $1
 		    ))
 		  )
+		  AND p.author NOT IN (SELECT blocked_id FROM block_events WHERE blocker_id = $1)
+		  AND p.author NOT IN (SELECT blocker_id FROM block_events WHERE blocked_id = $1)
 		ORDER BY p.created_at DESC
 		LIMIT $2
 	`

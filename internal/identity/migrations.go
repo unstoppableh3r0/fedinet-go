@@ -335,6 +335,124 @@ func ApplyMigrations() {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_account_links_requester ON account_links(requester_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_account_links_target ON account_links(target_id);`,
+
+		// User badge column: 'user' | 'moderator' | 'admin'
+		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS badge TEXT NOT NULL DEFAULT 'user'`,
+
+		// Moderation feature toggle stored in server_config
+		`INSERT INTO server_config (key, value, updated_by, updated_at)
+		 VALUES ('moderation_enabled', 'true', 'system', NOW())
+		 ON CONFLICT (key) DO NOTHING`,
+
+		// Reply visibility for moderation (HIDDEN while under review, PUBLIC/REJECTED after decision)
+		`ALTER TABLE replies ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'PUBLIC'`,
+		`CREATE INDEX IF NOT EXISTS idx_replies_visibility ON replies(visibility)`,
+
+		// Encrypted group messaging — each group has a unique AES-256 key stored
+		// wrapped with SERVER_MASTER_KEY so plaintext never appears in the DB.
+		`CREATE TABLE IF NOT EXISTS group_chats (
+			id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name                TEXT NOT NULL,
+			created_by          TEXT NOT NULL,
+			encrypted_group_key TEXT NOT NULL,
+			created_at          TIMESTAMP DEFAULT now(),
+			updated_at          TIMESTAMP DEFAULT now()
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS group_members (
+			group_id  UUID NOT NULL REFERENCES group_chats(id) ON DELETE CASCADE,
+			user_id   TEXT NOT NULL,
+			role      TEXT NOT NULL DEFAULT 'member',
+			joined_at TIMESTAMP DEFAULT now(),
+			PRIMARY KEY (group_id, user_id)
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS group_messages (
+			id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			group_id          UUID NOT NULL REFERENCES group_chats(id) ON DELETE CASCADE,
+			sender_id         TEXT NOT NULL,
+			encrypted_content TEXT NOT NULL,
+			created_at        TIMESTAMP DEFAULT now()
+		)`,
+
+		`CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_group_messages_group_time ON group_messages(group_id, created_at DESC)`,
+
+		`ALTER TABLE posts ADD COLUMN IF NOT EXISTS content_warning TEXT`,
+
+		// Linked multi-server posting: group identity for replica posts
+		`ALTER TABLE posts ADD COLUMN IF NOT EXISTS group_id TEXT`,
+		`ALTER TABLE posts ADD COLUMN IF NOT EXISTS origin_post TEXT`,
+		`ALTER TABLE posts ADD COLUMN IF NOT EXISTS origin_server TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_posts_group ON posts(group_id)`,
+
+		`CREATE TABLE IF NOT EXISTS privacy_audit_logs (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			event_type TEXT        NOT NULL,
+			actor_id   TEXT        NOT NULL,
+			target_id  TEXT        NOT NULL DEFAULT '',
+			detail     TEXT        NOT NULL DEFAULT '{}',
+			ip_addr    TEXT        NOT NULL DEFAULT '',
+			created_at TIMESTAMP   NOT NULL DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_privacy_audit_logs_actor ON privacy_audit_logs(actor_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_privacy_audit_logs_time  ON privacy_audit_logs(created_at DESC)`,
+
+		// DM at-rest encryption flag and group encryption policy
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_encrypted BOOLEAN NOT NULL DEFAULT false`,
+		`INSERT INTO server_config (key, value, updated_by, updated_at)
+		 VALUES ('dm_encryption_at_rest', 'false', 'system', NOW())
+		 ON CONFLICT (key) DO NOTHING`,
+		`INSERT INTO server_config (key, value, updated_by, updated_at)
+		 VALUES ('require_encrypted_groups', 'true', 'system', NOW())
+		 ON CONFLICT (key) DO NOTHING`,
+
+		// Zero-knowledge identity verification
+		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS zkp_public_key TEXT`,
+		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS zkp_last_proved_at TIMESTAMPTZ`,
+		`CREATE TABLE IF NOT EXISTS zkp_challenges (
+			id         TEXT        PRIMARY KEY,
+			user_id    TEXT        NOT NULL,
+			challenge  TEXT        NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL,
+			used       BOOLEAN     NOT NULL DEFAULT FALSE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_zkp_challenges_user ON zkp_challenges(user_id, expires_at)`,
+
+		// Remote post cache: stores feed slices fetched from other servers so that
+		// timeline requests are served locally without a live HTTP round-trip.
+		`CREATE TABLE IF NOT EXISTS remote_post_cache (
+			user_id       TEXT        NOT NULL,
+			remote_server TEXT        NOT NULL,
+			posts_json    JSONB       NOT NULL DEFAULT '[]',
+			fetched_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at    TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (user_id, remote_server)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_remote_post_cache_expires ON remote_post_cache(expires_at)`,
+
+		// Passkeys (WebAuthn) — primary passwordless login
+		`CREATE TABLE IF NOT EXISTS passkeys (
+			id            BIGSERIAL    PRIMARY KEY,
+			user_id       TEXT         NOT NULL REFERENCES identities(user_id) ON DELETE CASCADE,
+			credential_id BYTEA        NOT NULL UNIQUE,
+			public_key    BYTEA        NOT NULL,
+			sign_count    BIGINT       NOT NULL DEFAULT 0,
+			aaguid        TEXT         NOT NULL DEFAULT '',
+			created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_passkeys_user_id ON passkeys(user_id)`,
+
+		// Passkey recovery audit log
+		`CREATE TABLE IF NOT EXISTS passkey_recovery_attempts (
+			id           BIGSERIAL    PRIMARY KEY,
+			user_id      TEXT         NOT NULL,
+			ip_address   TEXT         NOT NULL DEFAULT '',
+			attempted_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+			succeeded    BOOLEAN      NOT NULL DEFAULT FALSE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_recovery_attempts_user_time ON passkey_recovery_attempts(user_id, attempted_at)`,
 	}
 
 	for _, schema := range schemas {

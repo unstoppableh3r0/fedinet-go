@@ -81,11 +81,24 @@ func UnfollowUser(followerID, followeeID string) error {
 func SendMessage(senderID, recipientID, content string, imageURL *string) error {
 	var messageID string
 
+	contentToStore := content
+	isEncrypted := false
+	if IsDMEncryptionEnabled() {
+		masterKey := os.Getenv("SERVER_MASTER_KEY")
+		if masterKey == "" {
+			masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
+		}
+		if enc, encErr := crypto.Encrypt(content, masterKey); encErr == nil {
+			contentToStore = enc
+			isEncrypted = true
+		}
+	}
+
 	err := db.QueryRow(
-		`INSERT INTO messages (sender_id, recipient_id, content, image_url)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO messages (sender_id, recipient_id, content, image_url, is_encrypted)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id`,
-		senderID, recipientID, content, imageURL,
+		senderID, recipientID, contentToStore, imageURL, isEncrypted,
 	).Scan(&messageID)
 
 	if err != nil {
@@ -379,21 +392,24 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 	return nil
 }
 
-func CreatePost(userID, content string, imageURL *string, visibility string) (string, error) {
+func CreatePost(userID, content string, imageURL *string, visibility string, expiresAt *time.Time, contentWarning *string, groupID, originPost, originServer *string) (string, error) {
 	// Allow image-only posts by using a space sentinel when content is empty
 	if content == "" {
 		content = " "
 	}
 	var postID string
 	err := db.QueryRow(`
-		INSERT INTO posts (author, content, image_url, visibility, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, NOW(), NOW())
+		INSERT INTO posts (author, content, image_url, visibility, expires_at, content_warning, group_id, origin_post, origin_server, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 		RETURNING id
-	`, userID, content, imageURL, visibility).Scan(&postID)
+	`, userID, content, imageURL, visibility, expiresAt, contentWarning, groupID, originPost, originServer).Scan(&postID)
 
 	if err != nil {
 		return "", err
 	}
+
+	// Index hashtags asynchronously so the HTTP response is not delayed
+	go IndexPostHashtags(postID, content)
 
 	return postID, nil
 }
@@ -472,15 +488,26 @@ func ToggleRepost(userID, postID string) error {
 }
 
 func CreateReply(userID, postID, content string, parentID *string) (string, error) {
+	return CreateReplyWithVisibility(userID, postID, content, parentID, "PUBLIC")
+}
+
+// CreateReplyWithVisibility stores a reply with the given visibility (PUBLIC or HIDDEN).
+// HIDDEN replies are held for moderation review without being shown to other users.
+func CreateReplyWithVisibility(userID, postID, content string, parentID *string, visibility string) (string, error) {
 	var replyID string
 	err := db.QueryRow(`
-		INSERT INTO replies (post_id, user_id, content, parent_id)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO replies (post_id, user_id, content, parent_id, visibility)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
-	`, postID, userID, content, parentID).Scan(&replyID)
+	`, postID, userID, content, parentID, visibility).Scan(&replyID)
 
 	if err != nil {
 		return "", err
+	}
+
+	// For HIDDEN replies, skip activity log and author notifications — don't expose the content yet
+	if visibility == "HIDDEN" {
+		return replyID, nil
 	}
 
 	payload := ""
@@ -562,9 +589,26 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
 			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) as has_liked,
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted,
-			p.image_url
+			p.image_url,
+			p.expires_at,
+			COALESCE(ps.disable_resharing, false) as resharing_disabled,
+			p.visibility,
+			p.content_warning
 		FROM posts p
-		WHERE p.author = $1 AND p.visibility = 'PUBLIC'
+		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
+		WHERE p.author = $1
+		  AND (p.expires_at IS NULL OR p.expires_at > NOW())
+		  AND p.visibility != 'HIDDEN'
+		  AND (
+		    p.author = $2
+		    OR p.visibility = 'PUBLIC'
+		    OR (p.visibility = 'FOLLOWERS' AND EXISTS(
+		        SELECT 1 FROM follows WHERE follower_user_id = $2 AND followee_user_id = p.author
+		    ))
+		    OR (p.visibility = 'CLOSE_FRIENDS' AND EXISTS(
+		        SELECT 1 FROM close_friends WHERE user_id = p.author AND friend_id = $2
+		    ))
+		  )
 		ORDER BY p.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
@@ -581,7 +625,8 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 		err := rows.Scan(
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
-			&p.HasLiked, &p.HasReposted, &p.ImageURL,
+			&p.HasLiked, &p.HasReposted, &p.ImageURL, &p.ExpiresAt,
+			&p.ResharingDisabled, &p.Visibility, &p.ContentWarning,
 		)
 		if err != nil {
 			return nil, err
@@ -609,9 +654,25 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
 			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
-			p.image_url
+			p.image_url,
+			p.expires_at,
+			COALESCE(ps.disable_resharing, false) as resharing_disabled,
+			p.visibility,
+			p.content_warning
 		FROM posts p
-		WHERE p.visibility = 'PUBLIC'
+		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
+		WHERE (p.expires_at IS NULL OR p.expires_at > NOW())
+		  AND p.visibility != 'HIDDEN'
+		  AND (
+		    p.author = $1
+		    OR p.visibility = 'PUBLIC'
+		    OR (p.visibility = 'FOLLOWERS' AND EXISTS(
+		        SELECT 1 FROM follows WHERE follower_user_id = $1 AND followee_user_id = p.author
+		    ))
+		    OR (p.visibility = 'CLOSE_FRIENDS' AND EXISTS(
+		        SELECT 1 FROM close_friends WHERE user_id = p.author AND friend_id = $1
+		    ))
+		  )
 		ORDER BY p.created_at DESC
 		LIMIT $2
 	`
@@ -628,7 +689,8 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 		err := rows.Scan(
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
-			&p.HasLiked, &p.HasReposted, &p.ImageURL,
+			&p.HasLiked, &p.HasReposted, &p.ImageURL, &p.ExpiresAt,
+			&p.ResharingDisabled, &p.Visibility, &p.ContentWarning,
 		)
 		if err != nil {
 			return nil, err
@@ -690,10 +752,25 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 		       (SELECT COUNT(*) FROM replies WHERE post_id = p.id) AS reply_count,
 		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
 		       EXISTS(SELECT 1 FROM likes  WHERE post_id = p.id AND user_id = $2) AS has_liked,
-		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted
+		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted,
+		       COALESCE(ps.disable_resharing, false) AS resharing_disabled,
+		       p.visibility,
+		       p.content_warning
 		FROM posts p
 		INNER JOIN likes l ON l.post_id = p.id
+		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE l.user_id = $1
+		  AND p.visibility != 'HIDDEN'
+		  AND (
+		    p.author = $2
+		    OR p.visibility = 'PUBLIC'
+		    OR (p.visibility = 'FOLLOWERS' AND EXISTS(
+		        SELECT 1 FROM follows WHERE follower_user_id = $2 AND followee_user_id = p.author
+		    ))
+		    OR (p.visibility = 'CLOSE_FRIENDS' AND EXISTS(
+		        SELECT 1 FROM close_friends WHERE user_id = p.author AND friend_id = $2
+		    ))
+		  )
 		ORDER BY p.created_at DESC
 		LIMIT $3 OFFSET $4
 	`, userID, viewerUserID, limit, offset)
@@ -709,6 +786,7 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
 			&p.HasLiked, &p.HasReposted,
+			&p.ResharingDisabled, &p.Visibility, &p.ContentWarning,
 		); err != nil {
 			return nil, err
 		}
@@ -726,10 +804,25 @@ func GetUserRepostedPosts(userID, viewerUserID string, limit, offset int) ([]mod
 		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
 		       EXISTS(SELECT 1 FROM likes   WHERE post_id = p.id AND user_id = $2) AS has_liked,
 		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted,
-		       p.image_url
+		       p.image_url,
+		       COALESCE(ps.disable_resharing, false) AS resharing_disabled,
+		       p.visibility,
+		       p.content_warning
 		FROM posts p
 		INNER JOIN reposts rp ON rp.post_id = p.id
+		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE rp.user_id = $1
+		  AND p.visibility != 'HIDDEN'
+		  AND (
+		    p.author = $2
+		    OR p.visibility = 'PUBLIC'
+		    OR (p.visibility = 'FOLLOWERS' AND EXISTS(
+		        SELECT 1 FROM follows WHERE follower_user_id = $2 AND followee_user_id = p.author
+		    ))
+		    OR (p.visibility = 'CLOSE_FRIENDS' AND EXISTS(
+		        SELECT 1 FROM close_friends WHERE user_id = p.author AND friend_id = $2
+		    ))
+		  )
 		ORDER BY rp.created_at DESC
 		LIMIT $3 OFFSET $4
 	`, userID, viewerUserID, limit, offset)
@@ -745,6 +838,7 @@ func GetUserRepostedPosts(userID, viewerUserID string, limit, offset int) ([]mod
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
 			&p.HasLiked, &p.HasReposted, &p.ImageURL,
+			&p.ResharingDisabled, &p.Visibility, &p.ContentWarning,
 		); err != nil {
 			return nil, err
 		}
@@ -761,15 +855,31 @@ func GetPostByID(postID, viewerUserID string) (*models.Post, error) {
 		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
 		       EXISTS(SELECT 1 FROM likes   WHERE post_id = p.id AND user_id = $2) AS has_liked,
 		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted,
-		       p.image_url
+		       p.image_url, p.expires_at,
+		       COALESCE(ps.disable_resharing, false) AS resharing_disabled,
+		       p.visibility,
+		       p.content_warning
 		FROM posts p
+		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE p.id = $1
+		  AND p.visibility != 'HIDDEN'
+		  AND (
+		    p.author = $2
+		    OR p.visibility = 'PUBLIC'
+		    OR (p.visibility = 'FOLLOWERS' AND EXISTS(
+		        SELECT 1 FROM follows WHERE follower_user_id = $2 AND followee_user_id = p.author
+		    ))
+		    OR (p.visibility = 'CLOSE_FRIENDS' AND EXISTS(
+		        SELECT 1 FROM close_friends WHERE user_id = p.author AND friend_id = $2
+		    ))
+		  )
 	`, postID, viewerUserID)
 	var p models.Post
 	if err := row.Scan(
 		&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 		&p.LikeCount, &p.ReplyCount, &p.RepostCount,
-		&p.HasLiked, &p.HasReposted, &p.ImageURL,
+		&p.HasLiked, &p.HasReposted, &p.ImageURL, &p.ExpiresAt,
+		&p.ResharingDisabled, &p.Visibility, &p.ContentWarning,
 	); err != nil {
 		return nil, err
 	}

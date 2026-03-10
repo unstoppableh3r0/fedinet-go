@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/google/uuid"
 	aimoderation "github.com/unstoppableh3r0/fedinet-go/internal/ai-moderation-service"
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
@@ -64,6 +66,27 @@ func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	internalUserID := ToInternalID(req.UserID)
+
+	// Only block new reposts — always allow un-reposting.
+	var alreadyReposted bool
+	db.QueryRow("SELECT EXISTS(SELECT 1 FROM reposts WHERE user_id=$1 AND post_id=$2)",
+		internalUserID, req.PostID).Scan(&alreadyReposted)
+
+	if !alreadyReposted {
+		var authorID string
+		if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", req.PostID).Scan(&authorID); err != nil {
+			RespondWithError(w, http.StatusNotFound, "post not found")
+			return
+		}
+		var disableResharing bool
+		db.QueryRow("SELECT COALESCE(disable_resharing, false) FROM privacy_settings WHERE user_id=$1",
+			authorID).Scan(&disableResharing)
+		if disableResharing {
+			RespondWithError(w, http.StatusForbidden, "author has disabled resharing of their posts")
+			return
+		}
+	}
+
 	if err := ToggleRepost(internalUserID, req.PostID); err != nil {
 		log.Printf("ToggleRepost error for user %s post %s: %v", internalUserID, req.PostID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to toggle repost")
@@ -82,9 +105,16 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID   string  `json:"user_id"`
-		Content  string  `json:"content"`
-		ImageURL *string `json:"image_url"`
+		UserID         string   `json:"user_id"`
+		Content        string   `json:"content"`
+		ImageURL       *string  `json:"image_url"`
+		ExpiresIn      *string  `json:"expires_in"` // e.g. "1h", "6h", "24h", "3d", "7d" or RFC3339 timestamp
+		Visibility     string   `json:"visibility"` // "PUBLIC" | "FOLLOWERS" | "CLOSE_FRIENDS" (default: "PUBLIC")
+		ContentWarning *string  `json:"content_warning"`
+		// LinkedTargets is a list of server base URLs to replicate this post to,
+		// e.g. ["http://serverB:8080", "http://serverC:8080"].
+		// Only used when the post author has confirmed account links on those servers.
+		LinkedTargets  []string `json:"linked_targets,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -97,40 +127,80 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ⭐ STEP A — AI MODERATION
-	aiResult, err := aimoderation.CallModerationAPI(req.Content)
-	if err != nil {
-		log.Println("AI moderation failed, continuing without AI:", err)
-
-		// fallback safe response
+	// ⭐ STEP A — AI MODERATION (skipped when moderation feature is disabled)
+	var aiResult *aimoderation.ModerationResponse
+	if IsModerationEnabled() {
+		var err error
+		aiResult, err = aimoderation.CallModerationAPI(req.Content)
+		if err != nil {
+			log.Println("AI moderation failed, continuing without AI:", err)
+			aiResult = &aimoderation.ModerationResponse{
+				Toxicity: 0.0, Hate: 0.0, Spam: 0.0, Threat: 0.0,
+				Confidence: 0.0, Recommendation: "SAFE",
+			}
+		}
+	} else {
 		aiResult = &aimoderation.ModerationResponse{
-			Toxicity:       0.0,
-			Hate:           0.0,
-			Spam:           0.0,
-			Threat:         0.0,
-			Confidence:     0.0,
-			Recommendation: "SAFE",
+			Toxicity: 0.0, Hate: 0.0, Spam: 0.0, Threat: 0.0,
+			Confidence: 0.0, Recommendation: "SAFE",
 		}
 	}
 
 	// ⭐ STEP B — FLAG AND DETERMINE VISIBILITY
-	visibility := "PUBLIC"
+	// Honour the user's requested visibility; AI moderation can override to HIDDEN.
+	userVisibility := req.Visibility
+	switch userVisibility {
+	case "FOLLOWERS", "CLOSE_FRIENDS":
+		// valid user-chosen levels — keep as is
+	default:
+		userVisibility = "PUBLIC"
+	}
+	visibility := userVisibility
 	if aiResult.Recommendation != "SAFE" {
 		visibility = "HIDDEN"
 	}
 
-	// ⭐ STEP C — SAVE POST
-	internalUserID := ToInternalID(req.UserID)
+	// ⭐ STEP C — PARSE EXPIRY
+	var expiresAt *time.Time
+	if req.ExpiresIn != nil && *req.ExpiresIn != "" {
+		// Accept shorthand durations: "1h", "6h", "24h", "3d", "7d"
+		// or an explicit RFC3339 timestamp
+		duration, durErr := parseExpiryShorthand(*req.ExpiresIn)
+		if durErr == nil {
+			t := time.Now().Add(duration)
+			expiresAt = &t
+		} else if ts, tsErr := time.Parse(time.RFC3339, *req.ExpiresIn); tsErr == nil {
+			expiresAt = &ts
+		}
+		// If unparseable, create as a normal post (no expiry)
+	}
 
-	postID, err := CreatePost(internalUserID, req.Content, req.ImageURL, visibility)
+	// ⭐ STEP D — GROUP ID for multi-server posting
+	// A group_id is always assigned so replica posts can be deduplicated in feeds.
+	groupIDStr := uuid.New().String()
+	originServerURL := GetServerURL()
+	var groupIDPtr, originPostPtr, originServerPtr *string
+	groupIDPtr = &groupIDStr
+	originServerPtr = &originServerURL
+
+	// ⭐ STEP E — SAVE ORIGIN POST
+	internalUserID := ToInternalID(req.UserID)
+	// originPost is set after we have the postID
+	postID, err := CreatePost(internalUserID, req.Content, req.ImageURL, visibility, expiresAt, req.ContentWarning, groupIDPtr, nil, originServerPtr)
 	if err != nil {
 		log.Printf("CreatePost error for user %s: %v", internalUserID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to create post")
 		return
 	}
+	// Now back-fill origin_post = our own post_id
+	originPostPtr = &postID
+	_ = SetPostOrigin(postID, postID)
 
 	// Ensure that if the post is hidden we explicitly inform the frontend gracefully
 	if visibility == "HIDDEN" {
+		// ⭐ Notify the author that their post is under review
+		_ = CreateNotification(internalUserID, "system", "POST_UNDER_REVIEW",
+			"Your post is being reviewed by our moderation team. Post ID: "+postID)
 		RespondWithJSON(w, http.StatusAccepted, map[string]interface{}{
 			"status":     "post_flagged_and_hidden",
 			"post_id":    postID,
@@ -139,8 +209,13 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
+	// ⭐ STEP F — FAN-OUT TO LINKED SERVERS (async, best-effort)
+	if len(req.LinkedTargets) > 0 {
+		go fanOutLinkedPost(req.UserID, postID, groupIDStr, originServerURL, req.Content, req.ImageURL, visibility, expiresAt, req.ContentWarning, req.LinkedTargets)
+	}
 
+	// Legacy ActivityPub federation send (kept for backward compat)
+	go func() {
 		message := map[string]interface{}{
 			"activity_type": "Create",
 			"actor_id":      req.UserID,
@@ -154,27 +229,81 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}
-
 		jsonData, _ := json.Marshal(message)
-
 		resp, err := http.Post(
 			"http://server_a_federation:8081/federation/send",
 			"application/json",
 			bytes.NewBuffer(jsonData),
 		)
-
 		if err != nil {
 			log.Println("Federation HTTP error:", err)
 			return
 		}
-
 		log.Println("Federation response:", resp.Status)
 	}()
 
+	_ = originPostPtr // used via SetPostOrigin
 	RespondWithJSON(w, http.StatusCreated, map[string]interface{}{
 		"post_id":    postID,
+		"group_id":   groupIDStr,
 		"moderation": aiResult,
 	})
+}
+
+// fanOutLinkedPost sends a linked-post replication request to each target server
+// that supports the linked_posts capability. Runs in a goroutine.
+func fanOutLinkedPost(
+	authorUserID, originPostID, groupID, originServerURL string,
+	content string, imageURL *string,
+	visibility string, expiresAt *time.Time,
+	contentWarning *string,
+	linkedTargets []string,
+) {
+	payload := map[string]interface{}{
+		"group_id":      groupID,
+		"origin_post":   originPostID,
+		"origin_server": originServerURL,
+		"author":        authorUserID,
+		"content":       content,
+		"visibility":    visibility,
+	}
+	if imageURL != nil {
+		payload["image_url"] = *imageURL
+	}
+	if expiresAt != nil {
+		payload["expires_at"] = expiresAt.Format(time.RFC3339)
+	}
+	if contentWarning != nil {
+		payload["content_warning"] = *contentWarning
+	}
+
+	sigHeader := BuildFederationSignatureHeader()
+	jsonData, _ := json.Marshal(payload)
+
+	for _, targetURL := range linkedTargets {
+		if !RemoteServerSupportsLinkedPosts(targetURL) {
+			log.Printf("fanOutLinkedPost: server %s does not support linked_posts, skipping", targetURL)
+			continue
+		}
+		req, err := http.NewRequest(http.MethodPost, targetURL+"/federation/linked-post", bytes.NewBuffer(jsonData))
+		if err != nil {
+			log.Printf("fanOutLinkedPost: failed to build request for %s: %v", targetURL, err)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Server-ID", sigHeader.ServerID)
+		req.Header.Set("X-Signature", sigHeader.Signature)
+		req.Header.Set("X-Timestamp", sigHeader.Timestamp)
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("fanOutLinkedPost: HTTP error for %s: %v", targetURL, err)
+			continue
+		}
+		resp.Body.Close()
+		log.Printf("fanOutLinkedPost: delivered to %s — status %s", targetURL, resp.Status)
+	}
 }
 
 // GetRecentPostsHandler handles GET /posts/recent
@@ -385,8 +514,10 @@ func MeHandler(w http.ResponseWriter, r *http.Request) {
 	profile.FollowingCount = &followingCount
 
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
-		"identity": ident,
-		"profile":  profile,
+		"identity":     ident,
+		"profile":      profile,
+		"badge":        GetUserBadge(internalUserID),
+		"is_moderator": IsModerator(internalUserID),
 	})
 }
 
@@ -535,4 +666,40 @@ func GetUserRepostedPostsHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"posts": posts,
 	})
+}
+
+// parseExpiryShorthand converts "1h", "6h", "12h", "24h", "3d", "7d" into a time.Duration.
+func parseExpiryShorthand(s string) (time.Duration, error) {
+	switch s {
+	case "1h":
+		return time.Hour, nil
+	case "6h":
+		return 6 * time.Hour, nil
+	case "12h":
+		return 12 * time.Hour, nil
+	case "24h":
+		return 24 * time.Hour, nil
+	case "3d":
+		return 72 * time.Hour, nil
+	case "7d":
+		return 168 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
+
+// StartEphemeralPostSweeper runs a background goroutine that deletes expired posts every 5 minutes.
+func StartEphemeralPostSweeper() {
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			res, err := db.Exec(`DELETE FROM posts WHERE expires_at IS NOT NULL AND expires_at < NOW()`)
+			if err != nil {
+				log.Printf("EphemeralPostSweeper: error deleting expired posts: %v", err)
+				continue
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				log.Printf("EphemeralPostSweeper: deleted %d expired post(s)", n)
+			}
+		}
+	}()
 }

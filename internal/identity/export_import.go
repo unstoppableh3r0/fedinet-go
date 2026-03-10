@@ -1,28 +1,68 @@
 package identity
 
-import "github.com/unstoppableh3r0/fedinet-go/pkg/models"
 import (
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
+	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
+// identityServerURL returns this server's base URL, used as the home_server
+// when re-anchoring an imported profile to the local server.
+// Reads IDENTITY_ENDPOINT, then IDENTITY_HOST:IDENTITY_PORT, then falls back to localhost:8080.
+func identityServerURL() string {
+	if v := os.Getenv("IDENTITY_ENDPOINT"); v != "" {
+		return v
+	}
+	if host := os.Getenv("IDENTITY_HOST"); host != "" {
+		port := os.Getenv("IDENTITY_PORT")
+		if port == "" {
+			port = os.Getenv("PORT")
+		}
+		if port == "" {
+			port = "8080"
+		}
+		return "http://" + host + ":" + port
+	}
+	return "http://localhost:8080"
+}
+
+// ExportProfileHandler exports all data for the authenticated user as a portable
+// JSON archive (identity, profile, posts, followers, following) signed with the
+// user's private key so the receiving server can verify ownership.
+//
+// GET /export
+// Headers: Authorization: Bearer <token>
 func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		RespondWithError(w, http.StatusBadRequest, "user_id required")
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+
+	// Require authentication — users can only export their own data.
+	authHeader := r.Header.Get("Authorization")
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		RespondWithError(w, http.StatusUnauthorized, "missing or invalid authorization header")
+		return
+	}
+	claims, err := ValidateUserToken(parts[1])
+	if err != nil {
+		RespondWithError(w, http.StatusUnauthorized, "invalid or expired token")
+		return
+	}
+	userID := claims.UserID
 
 	internalID := ToInternalID(userID)
 
 	var identity models.Identity
 	var encryptedPrivKey string
-	err := db.QueryRow(`
+	err = db.QueryRow(`
         SELECT id, user_id, home_server, public_key, private_key, allow_discovery, created_at, updated_at, key_version, recovery_key_hash
         FROM identities WHERE user_id=$1
     `, internalID).Scan(
@@ -101,6 +141,7 @@ func ExportProfileHandler(w http.ResponseWriter, r *http.Request) {
 	signature, _ := crypto.SignData([]byte(sigPayload), privKey)
 	export.IdentitySig = signature
 
+	LogPrivacyEvent("PROFILE_EXPORTED", internalID, "", "{}", clientIP(r))
 	w.Header().Set("Content-Disposition", "attachment; filename=profile_export.json")
 	RespondWithJSON(w, http.StatusOK, export)
 }
@@ -111,11 +152,19 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var importData models.PortableProfile
-	if err := json.NewDecoder(r.Body).Decode(&importData); err != nil {
+	// importRequest wraps PortableProfile with an optional new_password so the
+	// migrating user can set login credentials on the new server.
+	type importRequest struct {
+		models.PortableProfile
+		NewPassword string `json:"new_password"`
+	}
+
+	var req importRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	importData := req.PortableProfile
 
 	pubKey := importData.User.Identity.PublicKey
 	sigPayload := importData.User.Identity.UserID + importData.ExportedAt.String()
@@ -135,7 +184,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	internalID := ToInternalID(importData.User.Identity.UserID)
-	newHomeServer := "http://localhost:8080"
+	newHomeServer := identityServerURL()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -155,16 +204,30 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Hash the new password when provided; otherwise leave blank so the
+	// existing hash (on re-import) is preserved via the ON CONFLICT clause.
+	passwordHash := ""
+	if req.NewPassword != "" {
+		passwordHash, err = HashPassword(req.NewPassword)
+		if err != nil {
+			RespondWithError(w, http.StatusInternalServerError, "failed to hash password")
+			return
+		}
+	}
+
 	_, err = tx.Exec(`
         INSERT INTO identities (
-            id, user_id, home_server, public_key, private_key, 
-            key_version, recovery_key_hash, allow_discovery, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            id, user_id, home_server, public_key, private_key,
+            key_version, recovery_key_hash, allow_discovery, password_hash,
+            created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
         ON CONFLICT (user_id) DO UPDATE SET
-            home_server = EXCLUDED.home_server,
-            private_key = EXCLUDED.private_key,
-            public_key = EXCLUDED.public_key,
-            updated_at = NOW()
+            home_server    = EXCLUDED.home_server,
+            private_key    = EXCLUDED.private_key,
+            public_key     = EXCLUDED.public_key,
+            password_hash  = CASE WHEN EXCLUDED.password_hash <> '' THEN EXCLUDED.password_hash
+                                  ELSE identities.password_hash END,
+            updated_at     = NOW()
     `,
 		importData.User.Identity.ID,
 		internalID,
@@ -174,6 +237,7 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		importData.User.Identity.KeyVersion,
 		importData.User.Identity.RecoveryKeyHash,
 		importData.User.Identity.AllowDiscovery,
+		passwordHash,
 		importData.User.Identity.CreatedAt,
 	)
 	if err != nil {
@@ -190,13 +254,12 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
         ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
         ON CONFLICT (user_id) DO UPDATE SET
             display_name = EXCLUDED.display_name,
-            bio = EXCLUDED.bio,
-            avatar_url = EXCLUDED.avatar_url,
-            banner_url = EXCLUDED.banner_url,
-            version = EXCLUDED.version,
-            updated_at = NOW()
+            bio          = EXCLUDED.bio,
+            avatar_url   = EXCLUDED.avatar_url,
+            banner_url   = EXCLUDED.banner_url,
+            version      = EXCLUDED.version,
+            updated_at   = NOW()
     `, internalID, p.DisplayName, p.Bio, p.AvatarURL, p.BannerURL, p.CreatedAt, p.Version)
-
 	if err != nil {
 		log.Println("Import profile failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to import profile")
@@ -219,5 +282,6 @@ func ImportProfileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	LogPrivacyEvent("PROFILE_IMPORTED", internalID, "", "{}", clientIP(r))
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "profile imported successfully"})
 }

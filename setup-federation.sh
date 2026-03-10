@@ -64,6 +64,41 @@ if [ -f "internal/identity/migrations/006_fix_messages_schema.sql" ]; then
   run_migration "internal/identity/migrations/006_fix_messages_schema.sql" "fedinet_server_b"
 fi
 
+if [ -f "internal/identity/migrations/007_totp.sql" ]; then
+  run_migration "internal/identity/migrations/007_totp.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/007_totp.sql" "fedinet_server_b"
+fi
+
+if [ -f "internal/identity/migrations/008_ephemeral_posts.sql" ]; then
+  run_migration "internal/identity/migrations/008_ephemeral_posts.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/008_ephemeral_posts.sql" "fedinet_server_b"
+fi
+
+if [ -f "internal/identity/migrations/009_hashtags.sql" ]; then
+  run_migration "internal/identity/migrations/009_hashtags.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/009_hashtags.sql" "fedinet_server_b"
+fi
+
+if [ -f "internal/identity/migrations/009_identity_vouches.sql" ]; then
+  run_migration "internal/identity/migrations/009_identity_vouches.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/009_identity_vouches.sql" "fedinet_server_b"
+fi
+
+if [ -f "internal/identity/migrations/010_disable_resharing.sql" ]; then
+  run_migration "internal/identity/migrations/010_disable_resharing.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/010_disable_resharing.sql" "fedinet_server_b"
+fi
+
+if [ -f "internal/identity/migrations/011_post_visibility.sql" ]; then
+  run_migration "internal/identity/migrations/011_post_visibility.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/011_post_visibility.sql" "fedinet_server_b"
+fi
+
+if [ -f "internal/identity/migrations/012_passkeys.sql" ]; then
+  run_migration "internal/identity/migrations/012_passkeys.sql" "fedinet_server_a"
+  run_migration "internal/identity/migrations/012_passkeys.sql" "fedinet_server_b"
+fi
+
 echo "  - Restarting Identity Services to pick up schema..."
 docker restart server_a_identity server_b_identity
 sleep 5

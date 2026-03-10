@@ -122,6 +122,55 @@ func UpdateServerConfigHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetEncryptionPolicyHandler handles GET /admin/encryption/policy (admin-only).
+func GetEncryptionPolicyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	policy, err := GetEncryptionPolicy()
+	if err != nil {
+		log.Printf("GetEncryptionPolicy: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to read encryption policy")
+		return
+	}
+	RespondWithJSON(w, http.StatusOK, policy)
+}
+
+// UpdateEncryptionPolicyHandler handles POST /admin/encryption/policy (admin-only).
+// Body: { "dm_encryption_at_rest": true, "require_encrypted_groups": true }
+func UpdateEncryptionPolicyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		DMEncryptionAtRest     bool `json:"dm_encryption_at_rest"`
+		RequireEncryptedGroups bool `json:"require_encrypted_groups"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	adminUsername := "admin"
+	authHeader := r.Header.Get("Authorization")
+	parts := strings.Split(authHeader, " ")
+	if len(parts) == 2 {
+		if claims, err := ValidateJWT(parts[1]); err == nil {
+			adminUsername = claims.Username
+		}
+	}
+	if err := UpdateEncryptionPolicy(req.DMEncryptionAtRest, req.RequireEncryptedGroups, adminUsername); err != nil {
+		log.Printf("UpdateEncryptionPolicy: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to update encryption policy")
+		return
+	}
+	detail, _ := json.Marshal(req)
+	LogPrivacyEvent("ENCRYPTION_POLICY_CHANGED", adminUsername, "", string(detail), clientIP(r))
+	policy, _ := GetEncryptionPolicy()
+	RespondWithJSON(w, http.StatusOK, policy)
+}
+
 // notifyAllUsersServerRenamed sends a SERVER_UPDATE notification to every local user.
 func notifyAllUsersServerRenamed(newName string) {
 	rows, err := db.Query(`SELECT user_id FROM identities`)

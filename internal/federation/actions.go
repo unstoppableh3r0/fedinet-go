@@ -9,11 +9,29 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
+
+// selfURL returns the public-facing federation endpoint for this server.
+// Reads FEDERATION_ENDPOINT env var; falls back to FEDERATION_ADDRESS/HOST combinations,
+// and finally defaults to http://localhost:8081 if nothing is configured.
+func selfURL() string {
+	if v := os.Getenv("FEDERATION_ENDPOINT"); v != "" {
+		return v
+	}
+	if host := os.Getenv("FEDERATION_HOST"); host != "" {
+		port := os.Getenv("FEDERATION_PORT")
+		if port == "" {
+			port = "8081"
+		}
+		return "http://" + host + ":" + port
+	}
+	return "http://localhost:8081"
+}
 
 func SendFederatedActivity(activityID uuid.UUID, targetServer string, activityType, actorID string, targetID *string, payload map[string]interface{}) error {
 
@@ -63,7 +81,7 @@ func DeliverWithRetry(messageID uuid.UUID, targetServer, activityType, actorID s
 	message := models.InboxRequest{
 		ActivityType: activityType,
 		Actor:        actorID,
-		ActorServer:  "http://localhost:8081", // TODO: Get actual server URL
+		ActorServer:  selfURL(),
 		Target:       targetID,
 		Payload:      payload,
 	}
@@ -418,7 +436,7 @@ func SendAcknowledgment(messageID uuid.UUID, receiverServer string, status strin
 	}
 
 	resp, err := http.Post(
-		receiverServer+"/federation/ack",
+		receiverServer+"/federation/acknowledgment",
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
@@ -436,8 +454,8 @@ func TrackDeliveryState(messageID uuid.UUID, status string, reason *string) erro
 	_, err := db.Exec(`
 		INSERT INTO delivery_acknowledgments
 		(message_id, sender_server, receiver_server, status, reason)
-		VALUES ($1, 'http://localhost:8081', 'remote', $2, $3)
-	`, messageID, status, reason)
+		VALUES ($1, $2, 'remote', $3, $4)
+	`, messageID, selfURL(), status, reason)
 
 	if status == "processed" {
 		db.Exec(`
@@ -534,21 +552,56 @@ func AdvertiseCapabilities() (*models.ServerCapabilities, error) {
 	supportedTypes, _ := json.Marshal([]string{"Follow", "Like", "Post", "Message"})
 	rateLimitInfo, _ := json.Marshal(map[string]int{"requests_per_min": 100, "burst": 20})
 
+	// Feature flags — what this server supports beyond the core protocol.
+	features, _ := json.Marshal(map[string]bool{
+		"linked_posts":      true,
+		"identity_vouching": true,
+		"encrypted_groups":  true,
+		"identity_graph":    true,
+	})
+
 	caps := &models.ServerCapabilities{
 		ID:               uuid.New(),
-		ServerURL:        "http://localhost:8081",
+		ServerURL:        selfURL(),
 		ProtocolVersions: string(protocolVersions),
 		SupportedTypes:   string(supportedTypes),
 		MaxMessageSize:   1048576,
 		SupportsRetries:  true,
 		SupportsAcks:     true,
 		RateLimitInfo:    stringPtr(string(rateLimitInfo)),
+		CustomFeatures:   stringPtr(string(features)),
 		LastDiscoveredAt: time.Now(),
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
 
 	return caps, nil
+}
+
+// RemoteCapabilityFeatures is the parsed form of CustomFeatures JSON returned
+// by a remote server's /federation/capabilities endpoint.
+type RemoteCapabilityFeatures struct {
+	LinkedPosts      bool `json:"linked_posts"`
+	IdentityVouching bool `json:"identity_vouching"`
+	EncryptedGroups  bool `json:"encrypted_groups"`
+	IdentityGraph    bool `json:"identity_graph"`
+}
+
+// FetchRemoteCapabilities fetches and parses the capability features for a
+// remote server, using the DB cache when available and fresh (< 2 hours).
+func FetchRemoteCapabilities(serverURL string) (*RemoteCapabilityFeatures, error) {
+	caps, err := DiscoverRemoteCapabilities(serverURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var features RemoteCapabilityFeatures
+	if caps.CustomFeatures != nil {
+		if jsonErr := json.Unmarshal([]byte(*caps.CustomFeatures), &features); jsonErr != nil {
+			log.Printf("FetchRemoteCapabilities: failed to parse features for %s: %v", serverURL, jsonErr)
+		}
+	}
+	return &features, nil
 }
 
 func DiscoverRemoteCapabilities(serverURL string) (*models.ServerCapabilities, error) {

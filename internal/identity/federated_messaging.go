@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/unstoppableh3r0/fedinet-go/pkg/crypto"
 )
 
 // FederatedMessageRequest represents a message sent to a remote server
@@ -65,23 +67,29 @@ func DeliverFederatedMessage(fromUserID, toUserID, content string) error {
 		return fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	// Send to remote server
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(
-		fmt.Sprintf("%s/api/message/federated", remoteServer.Endpoint),
-		"application/json",
-		bytes.NewBuffer(reqJSON),
-	)
+	// Send to remote server with automatic retries
+	label := fmt.Sprintf("message → %s", serverName)
+	err = withRetry(label, func() error {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Post(
+			fmt.Sprintf("%s/api/message/federated", remoteServer.Endpoint),
+			"application/json",
+			bytes.NewBuffer(reqJSON),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to deliver message to %s: %v", serverName, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("remote server returned status %d", resp.StatusCode)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to deliver message to %s: %v", serverName, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("remote server returned status %d", resp.StatusCode)
+		return err
 	}
 
-	log.Printf("✅ Federated message delivered to %s on %s", toUserID, serverName)
+	log.Printf("Federated message delivered to %s on %s", toUserID, serverName)
 	return nil
 }
 
@@ -171,12 +179,23 @@ func StoreIncomingFederatedMessage(fromUserID, toUserID, content, originServer s
 	// toUserID arrives as "username@server_b" (external). ToInternalID handles the conversion.
 	internalTo := ToInternalID(toUserID)
 
-	// Sender is on a REMOTE server. Keep the ID as-is (e.g. "alice@server_a").
-	// This way GetConversationMessages can match using the exact sender string.
+	contentToStore := content
+	isEncrypted := false
+	if IsDMEncryptionEnabled() {
+		masterKey := os.Getenv("SERVER_MASTER_KEY")
+		if masterKey == "" {
+			masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
+		}
+		if enc, err := crypto.Encrypt(content, masterKey); err == nil {
+			contentToStore = enc
+			isEncrypted = true
+		}
+	}
+
 	_, err := db.Exec(`
-		INSERT INTO messages (sender_id, recipient_id, content, created_at, is_federated, origin_server)
-		VALUES ($1, $2, $3, NOW(), TRUE, $4)
-	`, fromUserID, internalTo, content, originServer)
+		INSERT INTO messages (sender_id, recipient_id, content, created_at, is_federated, origin_server, is_encrypted)
+		VALUES ($1, $2, $3, NOW(), TRUE, $4, $5)
+	`, fromUserID, internalTo, contentToStore, originServer, isEncrypted)
 
 	return err
 }
@@ -190,10 +209,23 @@ func StoreSentFederatedMessage(fromUserID, toUserID, content string) error {
 	}
 	recipientServer := parts[1]
 
+	contentToStore := content
+	isEncrypted := false
+	if IsDMEncryptionEnabled() {
+		masterKey := os.Getenv("SERVER_MASTER_KEY")
+		if masterKey == "" {
+			masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
+		}
+		if enc, err := crypto.Encrypt(content, masterKey); err == nil {
+			contentToStore = enc
+			isEncrypted = true
+		}
+	}
+
 	_, err := db.Exec(`
-		INSERT INTO messages (sender_id, recipient_id, content, created_at, is_federated, origin_server)
-		VALUES ($1, $2, $3, NOW(), TRUE, $4)
-	`, fromUserID, toUserID, content, recipientServer)
+		INSERT INTO messages (sender_id, recipient_id, content, created_at, is_federated, origin_server, is_encrypted)
+		VALUES ($1, $2, $3, NOW(), TRUE, $4, $5)
+	`, fromUserID, toUserID, contentToStore, recipientServer, isEncrypted)
 
 	return err
 }

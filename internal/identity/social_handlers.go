@@ -193,32 +193,47 @@ func CreateReplyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ⭐ STEP A — AI MODERATION
-	aiResult, err := aimoderation.CallModerationAPI(req.Content)
-	if err != nil {
-		log.Println("AI moderation failed, continuing without AI:", err)
-
-		// fallback safe response
+	// ⭐ STEP A — AI MODERATION (skipped when moderation feature is disabled)
+	var aiResult *aimoderation.ModerationResponse
+	if IsModerationEnabled() {
+		var err error
+		aiResult, err = aimoderation.CallModerationAPI(req.Content)
+		if err != nil {
+			log.Println("AI moderation failed, continuing without AI:", err)
+			aiResult = &aimoderation.ModerationResponse{
+				Toxicity: 0.0, Hate: 0.0, Spam: 0.0, Threat: 0.0,
+				Confidence: 0.0, Recommendation: "SAFE",
+			}
+		}
+	} else {
 		aiResult = &aimoderation.ModerationResponse{
-			Toxicity:       0.0,
-			Hate:           0.0,
-			Spam:           0.0,
-			Threat:         0.0,
-			Confidence:     0.0,
-			Recommendation: "SAFE",
+			Toxicity: 0.0, Hate: 0.0, Spam: 0.0, Threat: 0.0,
+			Confidence: 0.0, Recommendation: "SAFE",
 		}
 	}
 
-	// ⭐ STEP B — BLOCK OR FLAG
+	internalUserID := ToInternalID(req.UserID)
+
+	// ⭐ STEP B — FLAG: store flagged replies as HIDDEN so moderators can review them
 	if aiResult.Recommendation != "SAFE" {
+		replyID, err := CreateReplyWithVisibility(internalUserID, req.PostID, req.Content, req.ParentID, "HIDDEN")
+		if err != nil {
+			log.Println("Flagged reply save failed:", err)
+			RespondWithError(w, http.StatusInternalServerError, "reply failed")
+			return
+		}
+		// Notify the author that their reply is being reviewed
+		_ = CreateNotification(internalUserID, "system", "REPLY_UNDER_REVIEW",
+			"Your reply is being reviewed by our moderation team. Reply ID: "+replyID)
 		RespondWithJSON(w, http.StatusAccepted, map[string]interface{}{
 			"status":     "reply_flagged",
+			"reply_id":   replyID,
 			"moderation": aiResult,
 		})
 		return
 	}
 
-	replyID, err := CreateReply(ToInternalID(req.UserID), req.PostID, req.Content, req.ParentID)
+	replyID, err := CreateReply(internalUserID, req.PostID, req.Content, req.ParentID)
 	if err != nil {
 		log.Println("Reply failed:", err)
 		RespondWithError(w, http.StatusInternalServerError, "reply failed")

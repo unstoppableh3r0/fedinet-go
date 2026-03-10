@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_federation_messages_timestamp ON federation_messa
 
 CREATE TABLE IF NOT EXISTS delivery_attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    message_id UUID NOT NULL REFERENCES federation_messages(id) ON DELETE CASCADE,
+    message_id UUID NOT NULL REFERENCES outbox_activities(id) ON DELETE CASCADE,
     attempt_number INT NOT NULL,
     status VARCHAR(20) NOT NULL, -- 'pending', 'success', 'failed', 'expired'
     error_message TEXT,

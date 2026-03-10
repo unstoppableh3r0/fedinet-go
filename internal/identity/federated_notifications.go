@@ -54,24 +54,22 @@ func DeliverFederatedNotification(recipientID, actorID, typeStr, entityID string
 		return
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(
-		fmt.Sprintf("%s/api/notification/federated", remoteServer.Endpoint),
-		"application/json",
-		bytes.NewBuffer(body),
-	)
-	if err != nil {
-		log.Printf("DeliverFederatedNotification: delivery to %s failed: %v", targetServer, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("DeliverFederatedNotification: remote %s returned %d", targetServer, resp.StatusCode)
-		return
-	}
-
-	log.Printf("✅ Federated notification delivered to %s on %s", recipientID, targetServer)
+	withRetry(fmt.Sprintf("notification/%s → %s", typeStr, targetServer), func() error {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Post(
+			fmt.Sprintf("%s/api/notification/federated", remoteServer.Endpoint),
+			"application/json",
+			bytes.NewBuffer(body),
+		)
+		if err != nil {
+			return fmt.Errorf("delivery to %s failed: %v", targetServer, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("remote %s returned %d", targetServer, resp.StatusCode)
+		}
+		return nil
+	}) //nolint: errcheck — errors already logged by withRetry
 }
 
 // HandleIncomingFederatedNotification receives a notification from a remote server and stores it locally.

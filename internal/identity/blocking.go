@@ -55,6 +55,10 @@ func BlockUserHandler(w http.ResponseWriter, r *http.Request) {
 		// Log but don't fail the request
 	}
 
+	// Audit log
+	LogPrivacyEvent("USER_BLOCKED", internalBlockerID, internalBlockedID,
+		`{"reason":"`+req.Reason+`"}`, clientIP(r))
+
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
 }
 
@@ -87,6 +91,9 @@ func UnblockUserHandler(w http.ResponseWriter, r *http.Request) {
 		RespondWithError(w, http.StatusInternalServerError, "database error")
 		return
 	}
+
+	// Audit log
+	LogPrivacyEvent("USER_UNBLOCKED", internalBlockerID, internalBlockedID, "{}", clientIP(r))
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "user unblocked"})
 }

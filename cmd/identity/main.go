@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -59,6 +60,23 @@ func main() {
 	go identity.StartSessionKeyWorker()
 	go identity.StartTOTPPartialTokenSweeper()
 	identity.StartInviteSweeper()
+	identity.StartRemotePostCachePruner()
+
+	// ── Rate limiters ───────────────────────────────────────────────────────
+	// Auth endpoints: 10 requests / minute per IP (brute-force protection)
+	authLimiter := identity.NewRateLimiter(10, time.Minute)
+	// Write endpoints (posts, messages, etc.): 30 requests / minute per user
+	writeLimiter := identity.NewRateLimiter(30, time.Minute)
+	// General read endpoints: 120 requests / minute per IP
+	readLimiter := identity.NewRateLimiter(120, time.Minute)
+	// Federation endpoints: 60 requests / minute per IP
+	fedLimiter := identity.NewRateLimiter(60, time.Minute)
+
+	rlAuth := identity.AuthRateLimitMiddleware(authLimiter)
+	rlWrite := identity.PerUserRateLimitMiddleware(writeLimiter)
+	rlRead := identity.RateLimitMiddleware(readLimiter)
+	rlFed := identity.RateLimitMiddleware(fedLimiter)
+
 
 	mux := http.NewServeMux()
 
@@ -74,9 +92,9 @@ func main() {
 	})
 
 	// Auth
-	mux.HandleFunc("/register", identity.RegisterHandler)
-	mux.HandleFunc("/login", identity.LoginHandler)
-	mux.HandleFunc("/login/totp", identity.LoginTOTPHandler)
+	mux.Handle("/register", rlAuth(http.HandlerFunc(identity.RegisterHandler)))
+	mux.Handle("/login", rlAuth(http.HandlerFunc(identity.LoginHandler)))
+	mux.Handle("/login/totp", rlAuth(http.HandlerFunc(identity.LoginTOTPHandler)))
 	mux.HandleFunc("/logout", identity.LogoutHandler)
 	mux.HandleFunc("/refresh-token", identity.RefreshTokenHandler)
 	mux.HandleFunc("/recover", identity.RecoverAccountHandler)
@@ -88,6 +106,20 @@ func main() {
 	mux.HandleFunc("/totp/verify", identity.TOTPVerifyHandler)
 	mux.HandleFunc("/totp/disable", identity.TOTPDisableHandler)
 
+	// Passkeys (WebAuthn) — passwordless primary login
+	// Enroll (requires JWT)
+	mux.Handle("/passkey/register/begin", rlAuth(http.HandlerFunc(identity.PasskeyRegisterBeginHandler)))
+	mux.Handle("/passkey/register/complete", rlAuth(http.HandlerFunc(identity.PasskeyRegisterCompleteHandler)))
+	// Login (public)
+	mux.Handle("/passkey/login/begin", rlAuth(http.HandlerFunc(identity.PasskeyLoginBeginHandler)))
+	mux.Handle("/passkey/login/complete", rlAuth(http.HandlerFunc(identity.PasskeyLoginCompleteHandler)))
+	// Recovery via TOTP + recovery key (public, rate-limited to 5/hr via DB)
+	mux.Handle("/passkey/recover/begin", rlAuth(http.HandlerFunc(identity.PasskeyRecoverBeginHandler)))
+	mux.Handle("/passkey/recover/complete", rlAuth(http.HandlerFunc(identity.PasskeyRecoverCompleteHandler)))
+	// Status and remove (requires JWT)
+	mux.Handle("/passkey/status", rlRead(http.HandlerFunc(identity.PasskeyStatusHandler)))
+	mux.Handle("/passkey/remove", rlWrite(http.HandlerFunc(identity.PasskeyRemoveHandler)))
+
 	// Social — core
 	mux.HandleFunc("/feed", identity.GetFeedHandler)
 	mux.HandleFunc("/follow", identity.FollowHandler)
@@ -97,14 +129,18 @@ func main() {
 	mux.HandleFunc("/followers/remove", identity.RemoveFollowerHandler)
 	mux.HandleFunc("/follower/remove", identity.RemoveFollowerHandler) // alias used by frontend
 
+	// Close friends (per-post fine-grained visibility)
+	mux.HandleFunc("/close-friends", identity.CloseFriendsHandler)
+	mux.HandleFunc("/close-friends/remove", identity.RemoveCloseFriendHandler)
+
 	// Posts
 	mux.HandleFunc("/post/get", identity.GetPostByIDHandler)
-	mux.HandleFunc("/post/create", identity.CreatePostHandler)
-	mux.HandleFunc("/post/like", identity.ToggleLikeHandler)
-	mux.HandleFunc("/post/repost", identity.ToggleRepostHandler)
-	mux.HandleFunc("/post/reply", identity.CreateReplyHandler)      // frontend alias
-	mux.HandleFunc("/post/replies", identity.GetPostRepliesHandler) // frontend alias
-	mux.HandleFunc("/reply", identity.CreateReplyHandler)
+	mux.Handle("/post/create", rlWrite(http.HandlerFunc(identity.CreatePostHandler)))
+	mux.Handle("/post/like", rlWrite(http.HandlerFunc(identity.ToggleLikeHandler)))
+	mux.Handle("/post/repost", rlWrite(http.HandlerFunc(identity.ToggleRepostHandler)))
+	mux.Handle("/post/reply", rlWrite(http.HandlerFunc(identity.CreateReplyHandler))) // frontend alias
+	mux.HandleFunc("/post/replies", identity.GetPostRepliesHandler)                   // frontend alias
+	mux.Handle("/reply", rlWrite(http.HandlerFunc(identity.CreateReplyHandler)))
 	mux.HandleFunc("/replies", identity.GetPostRepliesHandler)
 	mux.HandleFunc("/posts/recent", identity.GetRecentPostsHandler)
 	mux.HandleFunc("/posts/user", identity.GetUserPostsHandler)
@@ -119,7 +155,7 @@ func main() {
 	mux.HandleFunc("/users/suggested", identity.GetSuggestedUsersHandler)
 
 	// Messages
-	mux.HandleFunc("/message", identity.MessageHandler)
+	mux.Handle("/message", rlWrite(http.HandlerFunc(identity.MessageHandler)))
 	mux.HandleFunc("/messages", identity.GetConversationsHandler)                     // frontend alias
 	mux.HandleFunc("/messages/conversation", identity.GetConversationMessagesHandler) // frontend alias
 	mux.HandleFunc("/conversations", identity.GetConversationsHandler)
@@ -141,9 +177,18 @@ func main() {
 	mux.HandleFunc("/revoke-key", identity.RevokeKeyHandler)
 	mux.HandleFunc("/revocations", identity.GetRevocationsHandler)
 
-	// Export & import
-	mux.HandleFunc("/export", identity.ExportProfileHandler)
-	mux.HandleFunc("/import", identity.ImportProfileHandler)
+	// Export & import (rate-limited: export reads data, import writes it)
+	mux.Handle("/export", rlRead(http.HandlerFunc(identity.ExportProfileHandler)))
+	mux.Handle("/import", rlWrite(http.HandlerFunc(identity.ImportProfileHandler)))
+
+	// Encrypted group messaging
+	mux.Handle("/groups/create", rlWrite(http.HandlerFunc(identity.CreateGroupHandler)))
+	mux.Handle("/groups", rlRead(http.HandlerFunc(identity.ListGroupsHandler)))
+	mux.Handle("/groups/members", rlRead(http.HandlerFunc(identity.GetGroupMembersHandler)))
+	mux.Handle("/groups/members/add", rlWrite(http.HandlerFunc(identity.AddGroupMemberHandler)))
+	mux.Handle("/groups/members/remove", rlWrite(http.HandlerFunc(identity.RemoveGroupMemberHandler)))
+	mux.Handle("/groups/message", rlWrite(http.HandlerFunc(identity.SendGroupMessageHandler)))
+	mux.Handle("/groups/messages", rlRead(http.HandlerFunc(identity.GetGroupMessagesHandler)))
 
 	// Federated search
 	mux.HandleFunc("/search", identity.FederatedSearchHandler)
@@ -155,14 +200,19 @@ func main() {
 	mux.HandleFunc("/api/posts/federated", identity.FederatedUserPostsHandler) // frontend federated posts proxy
 
 	// Federation incoming — called by remote servers
-	mux.HandleFunc("/federation/handshake", identity.HandleHandshakeRequest)
-	mux.HandleFunc("/federation/handshake/ack", identity.HandleHandshakeAcknowledgment)
-	mux.HandleFunc("/federation/profile", identity.HandleIncomingProfileUpdate)
-	mux.HandleFunc("/federation/message", identity.HandleIncomingFederatedMessage)
-	mux.HandleFunc("/api/message/federated", identity.HandleIncomingFederatedMessage) // alias used by DeliverFederatedMessage
-	mux.HandleFunc("/federation/notification", identity.HandleIncomingFederatedNotification)
-	mux.HandleFunc("/api/notification/federated", identity.HandleIncomingFederatedNotification) // alias used by DeliverFederatedNotification
-	mux.HandleFunc("/federation/follow", identity.HandleIncomingFederatedFollow)
+	mux.Handle("/federation/handshake", rlFed(http.HandlerFunc(identity.HandleHandshakeRequest)))
+	mux.Handle("/federation/handshake/ack", rlFed(http.HandlerFunc(identity.HandleHandshakeAcknowledgment)))
+	mux.Handle("/federation/profile", rlFed(http.HandlerFunc(identity.HandleIncomingProfileUpdate)))
+	mux.Handle("/federation/message", rlFed(http.HandlerFunc(identity.HandleIncomingFederatedMessage)))
+	mux.Handle("/api/message/federated", rlFed(http.HandlerFunc(identity.HandleIncomingFederatedMessage))) // alias used by DeliverFederatedMessage
+	mux.Handle("/federation/notification", rlFed(http.HandlerFunc(identity.HandleIncomingFederatedNotification)))
+	mux.Handle("/api/notification/federated", rlFed(http.HandlerFunc(identity.HandleIncomingFederatedNotification))) // alias used by DeliverFederatedNotification
+	mux.Handle("/federation/follow", rlFed(http.HandlerFunc(identity.HandleIncomingFederatedFollow)))
+	// Multi-server linked posting
+	mux.Handle("/federation/linked-post", rlFed(http.HandlerFunc(identity.HandleLinkedPostHandler)))
+	mux.Handle("/federation/propagate-edit", rlFed(http.HandlerFunc(identity.PropagateEditHandler)))
+	// Cross-server feed slices
+	mux.Handle("/federation/feed-slice", rlFed(http.HandlerFunc(identity.HandleFeedSliceHandler)))
 
 	// Server trust
 	mux.HandleFunc("/trusted-servers", identity.GetTrustedServersHandler)
@@ -191,6 +241,18 @@ func main() {
 	mux.Handle("/admin/users", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAllUsersHandler)))
 	mux.Handle("/admin/users/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAllUsersHandler)))
 	mux.Handle("/admin/stats", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetStatsHandler)))
+
+	// Privacy audit log (admin-only)
+	mux.Handle("/admin/privacy/logs", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetPrivacyLogsHandler)))
+
+	// Encryption policy (admin-only)
+	mux.Handle("/admin/encryption/policy", identity.AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			identity.GetEncryptionPolicyHandler(w, r)
+		} else {
+			identity.UpdateEncryptionPolicyHandler(w, r)
+		}
+	})))
 
 	// Admin invite management
 	mux.Handle("/admin/invites/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.ListInvitesHandler)))
@@ -236,6 +298,13 @@ func main() {
 	mux.Handle("/admin/moderators/remove", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RemoveModeratorHandler)))
 	mux.Handle("/admin/moderators/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.ListModeratorsHandler)))
 
+	// ── Badge management (admin-only) ─────────────────────────────────────────
+	mux.Handle("/admin/users/assign-badge", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AssignBadgeHandler)))
+
+	// ── Moderation feature toggle (admin-only) ────────────────────────────────
+	mux.Handle("/admin/moderation/status", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetModerationStatusHandler)))
+	mux.Handle("/admin/moderation/toggle", identity.AdminAuthMiddleware(http.HandlerFunc(identity.ToggleModerationHandler)))
+
 	// ── Moderator login (public route — checked against moderator_roles table) ─
 	mux.HandleFunc("/moderator/login", identity.ModeratorLoginHandler)
 
@@ -265,6 +334,43 @@ func main() {
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
+
+	// ── Identity vouching ─────────────────────────────────────────────────────
+	// Admin: issue / revoke / list vouches
+	mux.Handle("/admin/vouch", identity.AdminAuthMiddleware(http.HandlerFunc(identity.IssueVouchHandler)))
+	mux.Handle("/admin/vouch/revoke", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RevokeVouchHandler)))
+	mux.Handle("/admin/vouches", identity.AdminAuthMiddleware(http.HandlerFunc(identity.ListIssuedVouchesHandler)))
+	// Public: query vouches for any user (used by profile pages)
+	mux.HandleFunc("/api/vouches", identity.GetVouchesHandler)
+	// Federation: accept incoming vouch from a trusted peer
+	mux.HandleFunc("/federation/vouch", identity.HandleIncomingVouch)
+
+	// ── Zero-knowledge identity proofs ────────────────────────────────────────
+	mux.Handle("/zkp/register-key", rlWrite(http.HandlerFunc(identity.ZKPRegisterKeyHandler)))
+	mux.Handle("/zkp/challenge", rlWrite(http.HandlerFunc(identity.ZKPChallengeHandler)))
+	mux.Handle("/zkp/prove", rlWrite(http.HandlerFunc(identity.ZKPProveHandler)))
+	mux.Handle("/zkp/status", rlRead(http.HandlerFunc(identity.ZKPStatusHandler)))
+	mux.Handle("/zkp/verify-token", rlRead(http.HandlerFunc(identity.ZKPVerifyTokenHandler)))
+
+	// ── Server permission settings (admin-only) ───────────────────────────────
+	mux.Handle("/admin/settings/permissions", identity.AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			identity.GetPermissionsHandler(w, r)
+		} else if r.Method == http.MethodPost {
+			identity.UpdatePermissionsHandler(w, r)
+		} else {
+			identity.RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})))
+
+	// ── Hashtag routes ────────────────────────────────────────────────────────
+	mux.HandleFunc("/hashtags/trending", identity.GetTrendingHashtagsHandler)
+	mux.HandleFunc("/hashtags/trending/global", identity.GetGlobalTrendingHashtagsHandler)
+	mux.HandleFunc("/hashtags/posts", identity.GetHashtagPostsHandler)
+	mux.HandleFunc("/hashtags/federated", identity.FederatedHashtagSearchHandler)
+
+	// Start background sweeper for ephemeral (self-deleting) posts
+	identity.StartEphemeralPostSweeper()
 
 	handler := corsMiddleware(mux)
 

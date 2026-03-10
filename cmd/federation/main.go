@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/unstoppableh3r0/fedinet-go/internal/federation"
 )
@@ -23,10 +24,48 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	log.Println("🚀 Starting Federation Service...")
+	log.Println("Starting Federation Service...")
 
 	// Initialize database
 	federation.InitDB()
+
+	// ── Background workers ────────────────────────────────────────────────────
+	// Retry worker: drain delivery_attempts every 30 seconds
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := federation.ProcessRetryQueue(); err != nil {
+				log.Printf("[retry-worker] error processing retry queue: %v", err)
+			}
+		}
+	}()
+
+	// Expiry worker: mark stale pending messages as expired every hour
+	go func() {
+		// Run once immediately on startup, then every hour
+		if err := federation.ExpireOldMessages(); err != nil {
+			log.Printf("[expiry-worker] error expiring old messages: %v", err)
+		}
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := federation.ExpireOldMessages(); err != nil {
+				log.Printf("[expiry-worker] error expiring old messages: %v", err)
+			}
+		}
+	}()
+
+	// Health metrics worker: refresh instance_health stats every minute
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := federation.UpdateHealthMetrics(); err != nil {
+				log.Printf("[health-worker] error updating health metrics: %v", err)
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 
@@ -52,8 +91,8 @@ func main() {
 
 	handler := corsMiddleware(mux)
 
-	log.Println("✅ Federation service listening on :8081")
+	log.Println("Federation service listening on :8081")
 	if err := http.ListenAndServe(":8081", handler); err != nil {
-		log.Fatalf("❌ Server failed: %v", err)
+		log.Fatalf("Server failed: %v", err)
 	}
 }

@@ -56,6 +56,9 @@ services:
       PORT: "8082"
       AI_MODERATION_API_URL: http://ml-service:8090/moderate
       AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
+      # WebAuthn / Passkey settings
+      WEBAUTHN_RPID: localhost
+      WEBAUTHN_ORIGIN: http://localhost:3000
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,6 +106,9 @@ services:
       PORT: "8082"
       AI_MODERATION_API_URL: http://ml-service:8090/moderate
       AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
+      # WebAuthn / Passkey settings
+      WEBAUTHN_RPID: localhost
+      WEBAUTHN_ORIGIN: http://localhost:3000
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,10 +125,14 @@ services:
       - "9081:8081"
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_b?sslmode=disable
+      SERVER_URL: http://localhost:9082
+      SERVER_ID: server_b
+      SERVER_NAME: "Server B"
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
 
   # ── ML Moderation Microservice (shared by both federation servers) ──────────
   ml-service:

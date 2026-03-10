@@ -49,24 +49,22 @@ func DeliverFederatedFollow(followerID, followeeID, action string) {
 		return
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(
-		fmt.Sprintf("%s/federation/follow", remoteServer.Endpoint),
-		"application/json",
-		bytes.NewBuffer(body),
-	)
-	if err != nil {
-		log.Printf("DeliverFederatedFollow: delivery to %s failed: %v", targetServerID, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("DeliverFederatedFollow: remote %s returned %d", targetServerID, resp.StatusCode)
-		return
-	}
-
-	log.Printf("✅ Federated %s delivered: %s → %s", action, followerID, followeeID)
+	withRetry(fmt.Sprintf("follow/%s → %s", action, targetServerID), func() error {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Post(
+			fmt.Sprintf("%s/federation/follow", remoteServer.Endpoint),
+			"application/json",
+			bytes.NewBuffer(body),
+		)
+		if err != nil {
+			return fmt.Errorf("delivery to %s failed: %v", targetServerID, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("remote %s returned %d", targetServerID, resp.StatusCode)
+		}
+		return nil
+	}) //nolint: errcheck — errors already logged by withRetry
 }
 
 // HandleIncomingFederatedFollow receives a follow/unfollow event from a remote server

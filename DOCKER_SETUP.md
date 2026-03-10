@@ -124,6 +124,34 @@ Get-Content .\internal\identity\migrations\005_federated_messages.sql | docker e
 Get-Content .\internal\identity\migrations\006_fix_messages_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\identity\migrations\006_fix_messages_schema.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 
+# 007 — TOTP authenticator
+Get-Content .\internal\identity\migrations\007_totp.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\007_totp.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 008 — Ephemeral posts
+Get-Content .\internal\identity\migrations\008_ephemeral_posts.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\008_ephemeral_posts.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 009 — Hashtags
+Get-Content .\internal\identity\migrations\009_hashtags.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\009_hashtags.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 009 — Identity vouches
+Get-Content .\internal\identity\migrations\009_identity_vouches.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\009_identity_vouches.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 010 — Disable resharing
+Get-Content .\internal\identity\migrations\010_disable_resharing.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\010_disable_resharing.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 011 — Post visibility
+Get-Content .\internal\identity\migrations\011_post_visibility.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\011_post_visibility.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# 012 — Passkeys (WebAuthn)
+Get-Content .\internal\identity\migrations\012_passkeys.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\identity\migrations\012_passkeys.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
 # Federation tables
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
@@ -420,4 +448,11 @@ docker exec -it fedinet_postgres psql -U postgres -d fedinet_server_a
 | `internal/identity/migrations/004_session_keys.sql` | Session key rotation |
 | `internal/identity/migrations/005_federated_messages.sql` | Cross-server message delivery tables |
 | `internal/identity/migrations/006_fix_messages_schema.sql` | Schema fixes for federated messages |
+| `internal/identity/migrations/007_totp.sql` | TOTP authenticator support |
+| `internal/identity/migrations/008_ephemeral_posts.sql` | Ephemeral / disappearing posts |
+| `internal/identity/migrations/009_hashtags.sql` | Hashtag indexing |
+| `internal/identity/migrations/009_identity_vouches.sql` | Cross-server identity vouches |
+| `internal/identity/migrations/010_disable_resharing.sql` | Per-post resharing controls |
+| `internal/identity/migrations/011_post_visibility.sql` | Post visibility settings |
+| `internal/identity/migrations/012_passkeys.sql` | WebAuthn passkeys + recovery attempts |
 | `internal/federation/migrations.sql` | Federation-specific tables |

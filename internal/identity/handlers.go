@@ -181,6 +181,8 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		"identity":     *identity,
 		"profile":      *profile,
 		"is_following": isFollowing,
+		"badge":        GetUserBadge(internalUserID),
+		"is_moderator": IsModerator(internalUserID),
 	}
 
 	RespondWithJSON(w, http.StatusOK, response)

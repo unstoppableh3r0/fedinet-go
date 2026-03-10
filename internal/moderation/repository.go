@@ -32,6 +32,8 @@ type Repository interface {
 	GetModerationQueue() ([]map[string]interface{}, error)
 	UpdateReviewStatus(contentID string, status string) error
 	UpdatePostVisibility(postID string, visibility string) error
+	GetContentAuthor(contentID string) (string, string, error) // returns (author_id, content_type, err)
+	CreateUserNotification(recipientID, actorID, notifType, entityID string) error
 }
 
 type repository struct {
@@ -550,5 +552,35 @@ func (r *repository) UpdatePostVisibility(postID string, visibility string) erro
 		SET visibility = $1 
 		WHERE id = $2
 	`, visibility, postID)
+	// Also handle flagged replies stored in the replies table
+	if err == nil {
+		_, _ = r.db.Exec(`UPDATE replies SET visibility = $1 WHERE id = $2`, visibility, postID)
+	}
+	return err
+}
+
+// GetContentAuthor looks up the author of a post or reply.
+// Returns (author_user_id, content_type, error). content_type is "post" or "reply".
+func (r *repository) GetContentAuthor(contentID string) (string, string, error) {
+	var author string
+	err := r.db.QueryRow(`SELECT author FROM posts WHERE id = $1`, contentID).Scan(&author)
+	if err == nil {
+		return author, "post", nil
+	}
+	// Try replies table
+	err = r.db.QueryRow(`SELECT user_id FROM replies WHERE id = $1`, contentID).Scan(&author)
+	if err == nil {
+		return author, "reply", nil
+	}
+	return "", "", err
+}
+
+// CreateUserNotification inserts a notification into the notifications table.
+// This is used by the moderation service to notify content authors of decisions.
+func (r *repository) CreateUserNotification(recipientID, actorID, notifType, entityID string) error {
+	_, err := r.db.Exec(`
+		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, is_read, created_at)
+		VALUES ($1, $2, $3, $4, false, NOW())
+	`, recipientID, actorID, notifType, entityID)
 	return err
 }

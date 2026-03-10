@@ -79,14 +79,28 @@ func (s *Service) UpdateReviewStatus(contentID string, status string) error {
 		log.Printf("moderation: UpdateReviewStatus %q: %v", contentID, err)
 	}
 
+	// Look up the content author so we can notify them of the decision
+	authorID, contentType, authorErr := s.repo.GetContentAuthor(contentID)
+
 	switch status {
 	case "APPROVED":
-		// Make the post visible to everyone
-		return s.repo.UpdatePostVisibility(contentID, "PUBLIC")
+		if err := s.repo.UpdatePostVisibility(contentID, "PUBLIC"); err != nil {
+			return err
+		}
+		// Notify author
+		if authorErr == nil && authorID != "" {
+			notifMsg := "Your " + contentType + " has been reviewed and approved. It is now visible."
+			_ = s.repo.CreateUserNotification(authorID, "system", "POST_APPROVED", notifMsg)
+		}
 	case "REJECTED":
-		// Permanently remove from public view — use a distinct visibility so the
-		// post never surface again in /moderation/pending (which filters on HIDDEN only)
-		return s.repo.UpdatePostVisibility(contentID, "REJECTED")
+		if err := s.repo.UpdatePostVisibility(contentID, "REJECTED"); err != nil {
+			return err
+		}
+		// Notify author
+		if authorErr == nil && authorID != "" {
+			notifMsg := "Your " + contentType + " has been reviewed and rejected by our moderation team."
+			_ = s.repo.CreateUserNotification(authorID, "system", "POST_REJECTED", notifMsg)
+		}
 	}
 	return nil
 }

@@ -178,6 +178,92 @@ func UpdateServerName(newName, updatedBy string) error {
 	return tx.Commit()
 }
 
+// ── Encryption policy ──────────────────────────────────────────────────────────
+
+// EncryptionPolicy describes the server-level encryption enforcement settings.
+type EncryptionPolicy struct {
+	DMEncryptionAtRest     bool      `json:"dm_encryption_at_rest"`
+	RequireEncryptedGroups bool      `json:"require_encrypted_groups"`
+	UpdatedBy              string    `json:"updated_by"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+// GetEncryptionPolicy reads encryption policy from server_config.
+func GetEncryptionPolicy() (*EncryptionPolicy, error) {
+	p := &EncryptionPolicy{
+		DMEncryptionAtRest:     false,
+		RequireEncryptedGroups: true,
+		UpdatedBy:              "system",
+		UpdatedAt:              time.Now(),
+	}
+	var val, by string
+	var at time.Time
+	if err := db.QueryRow(`SELECT value, COALESCE(updated_by,'system'), updated_at FROM server_config WHERE key = 'dm_encryption_at_rest'`).Scan(&val, &by, &at); err == nil {
+		p.DMEncryptionAtRest = val == "true"
+		p.UpdatedBy = by
+		p.UpdatedAt = at
+	}
+	if err := db.QueryRow(`SELECT value, COALESCE(updated_by,'system'), updated_at FROM server_config WHERE key = 'require_encrypted_groups'`).Scan(&val, &by, &at); err == nil {
+		p.RequireEncryptedGroups = val != "false"
+		if at.After(p.UpdatedAt) {
+			p.UpdatedAt = at
+			p.UpdatedBy = by
+		}
+	}
+	return p, nil
+}
+
+// UpdateEncryptionPolicy persists both encryption policy settings.
+func UpdateEncryptionPolicy(dmAtRest, requireGroups bool, updatedBy string) error {
+	dmVal := "false"
+	if dmAtRest {
+		dmVal = "true"
+	}
+	groupVal := "false"
+	if requireGroups {
+		groupVal = "true"
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, kv := range [][2]string{
+		{"dm_encryption_at_rest", dmVal},
+		{"require_encrypted_groups", groupVal},
+	} {
+		_, err := tx.Exec(`
+			INSERT INTO server_config (key, value, updated_by, updated_at)
+			VALUES ($1, $2, $3, NOW())
+			ON CONFLICT (key) DO UPDATE SET value = $2, updated_by = $3, updated_at = NOW()
+		`, kv[0], kv[1], updatedBy)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// IsDMEncryptionEnabled returns true when DM at-rest encryption is turned on.
+func IsDMEncryptionEnabled() bool {
+	var val string
+	err := db.QueryRow(`SELECT value FROM server_config WHERE key = 'dm_encryption_at_rest'`).Scan(&val)
+	if err != nil {
+		return false // default: off
+	}
+	return val == "true"
+}
+
+// IsEncryptedGroupsRequired returns true when all group chats must use encryption.
+func IsEncryptedGroupsRequired() bool {
+	var val string
+	err := db.QueryRow(`SELECT value FROM server_config WHERE key = 'require_encrypted_groups'`).Scan(&val)
+	if err != nil {
+		return true // default: on
+	}
+	return val != "false"
+}
+
 func NotifyAllUsers(title, message, notifType string) error {
 	tx, err := db.Begin()
 	if err != nil {

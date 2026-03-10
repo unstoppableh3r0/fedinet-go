@@ -159,6 +159,10 @@ Get-Content .\internal\identity\migrations\013_totp_backup_codes.sql | docker ex
 # Federation tables
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
 Get-Content .\internal\federation\migrations.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
+
+# Federation 012 — Fix delivery_attempts FK (must run after migrations.sql)
+Get-Content .\internal\federation\012_fix_delivery_attempts_fk.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a
+Get-Content .\internal\federation\012_fix_delivery_attempts_fk.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b
 ```
 
 > **Note:** You may see `NOTICE: relation already exists` messages — that's fine. The `setup-federation.bat` / `setup-federation.sh` scripts run all of the above automatically.
@@ -459,4 +463,6 @@ docker exec -it fedinet_postgres psql -U postgres -d fedinet_server_a
 | `internal/identity/migrations/010_disable_resharing.sql` | Per-post resharing controls |
 | `internal/identity/migrations/011_post_visibility.sql` | Post visibility settings |
 | `internal/identity/migrations/012_passkeys.sql` | WebAuthn passkeys + recovery attempts |
+| `internal/identity/migrations/013_totp_backup_codes.sql` | TOTP backup recovery codes (single-use, hashed) |
 | `internal/federation/migrations.sql` | Federation-specific tables |
+| `internal/federation/012_fix_delivery_attempts_fk.sql` | Fix `delivery_attempts` FK → `outbox_activities` |

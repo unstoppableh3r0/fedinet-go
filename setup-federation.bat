@@ -122,11 +122,17 @@ if %errorlevel% neq 0 (
     echo   WARNING: Server A federation migration had issues (tables may already exist)
 )
 
-echo   - Migrating Server B database...
+echo   - Migrating Server B Federation...
 docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b < internal\federation\migrations.sql
 if %errorlevel% neq 0 (
     echo   WARNING: Server B federation migration had issues (tables may already exist)
 )
+
+echo   - Migrating Server A Federation (Fix delivery_attempts FK)...
+type internal\federation\012_fix_delivery_attempts_fk.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_a > nul
+
+echo   - Migrating Server B Federation (Fix delivery_attempts FK)...
+type internal\federation\012_fix_delivery_attempts_fk.sql | docker exec -i fedinet_postgres psql -U postgres -d fedinet_server_b > nul
 
 REM Step 4: Initialize both servers
 echo [4/5] Initializing servers...

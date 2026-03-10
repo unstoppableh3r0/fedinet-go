@@ -42,6 +42,12 @@ services:
     container_name: server_a_identity
     ports:
       - "8080:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_a?sslmode=disable
       ADMIN_USERNAME: admin
@@ -94,6 +100,12 @@ services:
     container_name: server_b_identity
     ports:
       - "9080:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/fedinet_server_b?sslmode=disable
       ADMIN_USERNAME: admin

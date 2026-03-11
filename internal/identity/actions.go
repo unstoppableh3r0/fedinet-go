@@ -12,67 +12,88 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
+// ============================================================================
+// SOCIAL GRAPH ENGINE: FOLLOWS & UNFOLLOWS
+// ============================================================================
+
+// FollowUser establishes a unidirectional relationship between two entities.
+// This function implements "Smart Discovery": it detects if the target user
+// exists on the local instance or a remote federated instance.
 func FollowUser(followerID, followeeID string) error {
 	localEndpoint := getLocalEndpoint()
 
+	// FEDERATION DISCOVERY LOGIC
 	// Determine the followee's home server: if it's a federated user, look up
 	// the trusted server endpoint; otherwise use the local endpoint.
 	followeeHomeServer := localEndpoint
 	isFed, followeeServerID := IsFederatedUser(followeeID)
 	if isFed {
+		// If the user is remote, we resolve their home server URL from our
+		// trusted_servers whitelist table.
 		if ts, err := GetTrustedServer(followeeServerID); err == nil {
 			followeeHomeServer = ts.Endpoint
 		}
 	}
 
+	// PERSISTENCE LAYER
+	// Store the relationship using an idempotent INSERT.
 	_, err := db.Exec(
 		`INSERT INTO follows (follower_user_id, follower_home_server, followee_user_id, followee_home_server)
-		 VALUES ($1, $2, $3, $4)
-		 ON CONFLICT DO NOTHING`,
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING`,
 		followerID, localEndpoint, followeeID, followeeHomeServer,
 	)
 	if err != nil {
 		return err
 	}
 
+	// CACHE COORDINATION
 	// Invalidate cache immediately so the updated lists are visible right away.
+	// This prevents "stale state" UI issues where a user follows but the count doesn't increment.
 	invalidateFollowCaches(followerID, followeeID)
 
-	// Non-fatal: log activity and create notification — don't block follow on these
+	// AUDIT LOGGING
+	// Non-fatal: log activity and create notification — don't block follow on these.
+	// Uses the internal outbox/activity stream to track user history.
 	if logErr := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); logErr != nil {
 		log.Printf("Warning: failed to log follow activity: %v", logErr)
 	}
 
+	// OUTBOUND FEDERATION
 	// Propagate the follow relationship to the remote server's DB so their
 	// /followers endpoint returns the correct list.
+	// Delivered asynchronously via goroutine to maintain low latency for the local user.
 	if isFed {
 		go DeliverFederatedFollow(followerID, followeeID, "follow")
 	}
 
+	// NOTIFICATION PIPELINE
+	// Alert the followee that they have gained a new follower.
 	if notifErr := CreateNotification(followeeID, followerID, "FOLLOW", followeeID); notifErr != nil {
 		log.Printf("Warning: failed to create follow notification: %v", notifErr)
 	}
 	return nil
 }
 
+// UnfollowUser terminates a relationship and synchronizes the deletion across the network.
 func UnfollowUser(followerID, followeeID string) error {
 	_, err := db.Exec(
 		`DELETE FROM follows
-		 WHERE follower_user_id = $1 AND followee_user_id = $2`,
+         WHERE follower_user_id = $1 AND followee_user_id = $2`,
 		followerID, followeeID,
 	)
 	if err != nil {
 		return err
 	}
 
-	// Invalidate cache so lists are accurate immediately.
+	// Ensure immediate UI consistency.
 	invalidateFollowCaches(followerID, followeeID)
 
 	if err := LogActivity(followerID, "UNFOLLOW", "user", followeeID, "", ""); err != nil {
 		return err
 	}
 
-	// Propagate the unfollow to the remote server's DB.
+	// FEDERATED SYNC: Notify the remote server to remove the follower from their local DB.
 	if isFed, _ := IsFederatedUser(followeeID); isFed {
 		go DeliverFederatedFollow(followerID, followeeID, "unfollow")
 		// Also send a notification so the followee knows they were unfollowed.
@@ -82,13 +103,19 @@ func UnfollowUser(followerID, followeeID string) error {
 	return nil
 }
 
+// ============================================================================
+// COMMUNICATION: MESSAGES & CONTENT
+// ============================================================================
+
+// SendMessage handles direct peer-to-peer communication.
 func SendMessage(senderID, recipientID, content string, imageURL *string) error {
 	var messageID string
 
+	// ATOMIC STORAGE
 	err := db.QueryRow(
 		`INSERT INTO messages (sender_id, recipient_id, content, image_url)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id`,
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
 		senderID, recipientID, content, imageURL,
 	).Scan(&messageID)
 
@@ -96,12 +123,14 @@ func SendMessage(senderID, recipientID, content string, imageURL *string) error 
 		return err
 	}
 
+	// ACTIVITY LOGGING: JSON payload facilitates richer frontend timelines.
 	payload := fmt.Sprintf(`{"content": %q}`, content)
 	if logErr := LogActivity(senderID, "MESSAGE", "message", messageID, recipientID, payload); logErr != nil {
 		log.Printf("Warning: failed to log message activity: %v", logErr)
 	}
 
-	// Notify recipient with full AS2 payload
+	// AS2 (ActivityStreams 2.0) COMPATIBILITY
+	// Notify recipient with full AS2 payload to support cross-app standardization.
 	CreateNotificationWithExtras(recipientID, senderID, "MESSAGE", messageID, map[string]interface{}{
 		"content": content,
 		"to":      recipientID,
@@ -109,10 +138,11 @@ func SendMessage(senderID, recipientID, content string, imageURL *string) error 
 	return nil
 }
 
+// UpdateBio updates user metadata and logs the change for auditing.
 func UpdateBio(userID, newBio string) error {
 	_, err := db.Exec(
 		`UPDATE profiles SET bio=$1, updated_at=NOW()
-		 WHERE user_id=$2`,
+         WHERE user_id=$2`,
 		newBio, userID,
 	)
 	if err != nil {
@@ -129,45 +159,60 @@ func UpdateBio(userID, newBio string) error {
 	)
 }
 
+// ============================================================================
+// FEDERATION OUTBOX: ACTIVITY LOGGING
+// ============================================================================
+
+// LogActivity acts as the "Outbox Producer". It pushes data into outbox_activities
+// where background workers will eventually pick it up for delivery to remote servers.
 func LogActivity(actorID, verb, objectType, objectID, targetID, payload string) error {
 	if payload == "" {
 		payload = "{}"
 	}
-	// Insert into outbox_activities (the real table). 'activities' does not exist.
+	// Note: We use the 'sent' status as a default, though workers may transition this
+	// to 'pending' if it requires retry logic.
 	_, err := db.Exec(
 		`INSERT INTO outbox_activities
-		(activity_type, actor_id, target_server, target_id, payload, delivery_status, attempt_count)
-		VALUES ($1, $2, $3, $4, $5::jsonb, 'sent', 0)`,
+        (activity_type, actor_id, target_server, target_id, payload, delivery_status, attempt_count)
+        VALUES ($1, $2, $3, $4, $5::jsonb, 'sent', 0)`,
 		verb, actorID, objectType, objectID, payload,
 	)
 	if err != nil {
-		// Non-fatal: log the error but don't block the primary action
+		// Non-fatal: Activity logging failure should not crash the user's primary action.
 		log.Printf("LogActivity warning (non-fatal): %v", err)
 	}
 	return nil
 }
 
+// ============================================================================
+// IDENTITY & ACCOUNT MANAGEMENT
+// ============================================================================
+
+
+
+// GetProfileByUserID retrieves a full Profile model including aggregated counts.
 func GetProfileByUserID(userID string) (*models.Profile, error) {
+	// Complex Query: Joins profiles with subqueries for real-time Follower/Following counts.
 	query := `
-		SELECT
-			user_id,
-			display_name,
-			avatar_url,
-			banner_url,
-			bio,
-			portfolio_url,
-			birth_date,
-			location,
-			followers_visibility,
-			following_visibility,
-			created_at,
-			updated_at,
+        SELECT
+            user_id,
+            display_name,
+            avatar_url,
+            banner_url,
+            bio,
+            portfolio_url,
+            birth_date,
+            location,
+            followers_visibility,
+            following_visibility,
+            created_at,
+            updated_at,
             version,
-			(SELECT COUNT(*) FROM follows WHERE followee_user_id = profiles.user_id) as followers_count,
-			(SELECT COUNT(*) FROM follows WHERE follower_user_id = profiles.user_id) as following_count
-		FROM profiles
-		WHERE user_id = $1
-	`
+            (SELECT COUNT(*) FROM follows WHERE followee_user_id = profiles.user_id) as followers_count,
+            (SELECT COUNT(*) FROM follows WHERE follower_user_id = profiles.user_id) as following_count
+        FROM profiles
+        WHERE user_id = $1
+    `
 
 	var p models.Profile
 	var birthDate sql.NullTime
@@ -198,6 +243,7 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 		return nil, err
 	}
 
+	// Handle SQL null dates gracefully for JSON serialization.
 	if birthDate.Valid {
 		t := birthDate.Time
 		p.BirthDate = &t
@@ -206,27 +252,35 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 	return &p, nil
 }
 
+// CreateAccount implements the "Identity Protocol" for new users.
+// It generates RSA/ED25519 keys, an encrypted private key store, and a DID.
 func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
+	// 1. INPUT VALIDATION
 	if !ValidateUserID(userID) {
 		return "", fmt.Errorf("invalid user_id format")
 	}
 
+	// 2. CRYPTOGRAPHIC ASSET GENERATION
+	// Generate public/private keypair for signing federated activities.
 	pubKey, privKey, err := crypto.GenerateKeyPair()
 	if err != nil {
 		return "", err
 	}
 
+	// Generate a 24-word or mnemonic recovery key in case of password loss.
 	recoveryKey, recoveryHash, err := crypto.GenerateRecoveryKey()
 	if err != nil {
 		return "", err
 	}
 
+	// 3. TRANSACTIONAL INTEGRITY
 	tx, err := db.Begin()
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
 
+	// Check for existing users to prevent identity collisions.
 	var exists bool
 	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM identities WHERE user_id=$1)", userID).Scan(&exists)
 	if err != nil {
@@ -236,6 +290,9 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", fmt.Errorf("user already exists")
 	}
 
+	// 4. AT-REST ENCRYPTION
+	// The private key is NEVER stored in plaintext. It is encrypted with the
+	// server's master key before storage.
 	masterKey := os.Getenv("SERVER_MASTER_KEY")
 	if masterKey == "" {
 		masterKey = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -247,27 +304,31 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 		return "", fmt.Errorf("failed to encrypt private key: %w", err)
 	}
 
+	// 5. DECENTRALIZED IDENTIFIER (DID)
+	// Create a unique DID based on the hash of the public key.
 	did := "did:fedinet:" + crypto.HashString(pubKey)
 
+	// 6. DB INSERTION
 	identityID := uuid.New()
 	_, err = tx.Exec(`
-		INSERT INTO identities (
-			id, did, user_id, home_server, public_key, private_key, key_version, recovery_key_hash, password_hash, allow_discovery, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, true, NOW(), NOW())
-	`, identityID, did, userID, homeServer, pubKey, encryptedPrivKey, recoveryHash, passwordHash)
+        INSERT INTO identities (
+            id, did, user_id, home_server, public_key, private_key, key_version, recovery_key_hash, password_hash, allow_discovery, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, true, NOW(), NOW())
+    `, identityID, did, userID, homeServer, pubKey, encryptedPrivKey, recoveryHash, passwordHash)
 	if err != nil {
 		return "", err
 	}
 
+	// Initialize the associated profile with default metadata.
 	_, err = tx.Exec(`
-		INSERT INTO profiles (
-			user_id, display_name, bio, location, 
-			followers_visibility, following_visibility, created_at, updated_at, version
-		) VALUES (
-			$1, $2, 'Just joined Gotham Social', 'Unknown',
-			'public', 'public', NOW(), NOW(), 1
-		)
-	`, userID, userID)
+        INSERT INTO profiles (
+            user_id, display_name, bio, location,
+            followers_visibility, following_visibility, created_at, updated_at, version
+        ) VALUES (
+            $1, $2, 'Just joined Gotham Social', 'Unknown',
+            'public', 'public', NOW(), NOW(), 1
+        )
+    `, userID, userID)
 	if err != nil {
 		return "", err
 	}
@@ -275,22 +336,23 @@ func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 	return recoveryKey, tx.Commit()
 }
 
+// GetIdentityByUserID fetches the cryptographic identity details for a user.
 func GetIdentityByUserID(userID string) (*models.Identity, error) {
 	query := `
-		SELECT
-			id,
-			user_id,
-			home_server,
-			public_key,
-			allow_discovery,
-			created_at,
-			updated_at,
+        SELECT
+            id,
+            user_id,
+            home_server,
+            public_key,
+            allow_discovery,
+            created_at,
+            updated_at,
             COALESCE(signature, '') as signature,
             key_version,
             COALESCE(recovery_key_hash, '') as recovery_key_hash
-		FROM identities
-		WHERE user_id = $1
-	`
+        FROM identities
+        WHERE user_id = $1
+    `
 
 	var i models.Identity
 
@@ -311,18 +373,20 @@ func GetIdentityByUserID(userID string) (*models.Identity, error) {
 		return nil, nil
 	}
 	if err != nil {
-
 		return nil, err
 	}
 
 	return &i, nil
 }
 
+// UpdateProfile executes a dynamic SQL update based on provided pointer fields.
+// This prevents overwriting existing data with empty strings.
 func UpdateProfile(req models.UpdateProfileRequest) error {
 	query := "UPDATE profiles SET updated_at = NOW(), version = version + 1"
 	args := []interface{}{}
 	argCount := 1
 
+	// DYNAMIC SQL BUILDER: Only append fields that are non-nil in the request.
 	if req.DisplayName != nil {
 		query += fmt.Sprintf(", display_name = $%d", argCount)
 		args = append(args, *req.DisplayName)
@@ -380,25 +444,30 @@ func UpdateProfile(req models.UpdateProfileRequest) error {
 	return propagateProfileUpdate(req.UserID, req)
 }
 
+// propagateProfileUpdate triggers a network-wide sync for profile changes.
 func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) error {
 	// Deliver asynchronously so the HTTP response returns immediately.
-	// PropagateProfileToTrustedServers fans out to every trusted server via
-	// its own goroutines, so we just call it directly.
+	// This ensures a snappy UX even if remote servers are slow to respond.
 	go PropagateProfileToTrustedServers(userID, req)
 	return nil
 }
 
+// ============================================================================
+// CONTENT CREATION: POSTS, LIKES, REPOSTS
+// ============================================================================
+
+// CreatePost generates a new status update or media-rich post.
 func CreatePost(userID, content string, imageURL *string, visibility string) (string, error) {
-	// Allow image-only posts by using a space sentinel when content is empty
+	// Allow image-only posts by using a space sentinel when content is empty.
 	if content == "" {
 		content = " "
 	}
 	var postID string
 	err := db.QueryRow(`
-		INSERT INTO posts (author, content, image_url, visibility, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, NOW(), NOW())
-		RETURNING id
-	`, userID, content, imageURL, visibility).Scan(&postID)
+        INSERT INTO posts (author, content, image_url, visibility, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        RETURNING id
+    `, userID, content, imageURL, visibility).Scan(&postID)
 
 	if err != nil {
 		return "", err
@@ -407,9 +476,10 @@ func CreatePost(userID, content string, imageURL *string, visibility string) (st
 	return postID, nil
 }
 
+// ToggleLike implements a stateless "Like/Unlike" switch.
 func ToggleLike(userID, postID string) error {
-
 	var exists bool
+	// Check for existing like to determine if we are adding or removing.
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM likes WHERE user_id=$1 AND post_id=$2)", userID, postID).Scan(&exists)
 	if err != nil {
 		return err
@@ -425,10 +495,13 @@ func ToggleLike(userID, postID string) error {
 		return err
 	}
 
+	// NOTIFICATION & LOGGING LOGIC
 	if !exists {
+		// New Like: Log activity for the outbox.
 		if err := LogActivity(userID, "LIKE", "post", postID, "", ""); err != nil {
 			return err
 		}
+		// Notify the author (only if the liker isn't the author).
 		var authorID string
 		if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
 			if authorID != userID {
@@ -437,7 +510,7 @@ func ToggleLike(userID, postID string) error {
 		}
 		return nil
 	}
-	// Unlike: also send an Undo/Like notification so clients can withdraw it
+	// Unlike: send an UNLIKE notification so clients can update in real-time.
 	var authorID string
 	if err := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); err == nil {
 		if authorID != userID {
@@ -447,6 +520,7 @@ func ToggleLike(userID, postID string) error {
 	return nil
 }
 
+// ToggleRepost handles sharing content to the user's followers.
 func ToggleRepost(userID, postID string) error {
 	var exists bool
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM reposts WHERE user_id=$1 AND post_id=$2)", userID, postID).Scan(&exists)
@@ -468,7 +542,7 @@ func ToggleRepost(userID, postID string) error {
 		if err := LogActivity(userID, "REPOST", "post", postID, "", ""); err != nil {
 			return err
 		}
-		// Notify original author
+		// Notify original author of the shared content.
 		var authorID string
 		if qErr := db.QueryRow("SELECT author FROM posts WHERE id=$1", postID).Scan(&authorID); qErr == nil {
 			if authorID != userID {
@@ -480,18 +554,20 @@ func ToggleRepost(userID, postID string) error {
 	return nil
 }
 
+// CreateReply generates a threaded response to an existing post.
 func CreateReply(userID, postID, content string, parentID *string) (string, error) {
 	var replyID string
 	err := db.QueryRow(`
-		INSERT INTO replies (post_id, user_id, content, parent_id)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, postID, userID, content, parentID).Scan(&replyID)
+        INSERT INTO replies (post_id, user_id, content, parent_id)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+    `, postID, userID, content, parentID).Scan(&replyID)
 
 	if err != nil {
 		return "", err
 	}
 
+	// Build activity log with nested JSON to preserve thread hierarchy.
 	payload := ""
 	if parentID != nil {
 		payload = fmt.Sprintf(`{"parent_id": "%s", "content": %q}`, *parentID, content)
@@ -501,7 +577,7 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 
 	LogActivity(userID, "REPLY", "post", postID, "", payload)
 
-	// Build extras for the richer AS2 Create/Note payload
+	// NOTIFICATION FAN-OUT: Notify both the main post author AND the parent reply author.
 	replyExtras := map[string]interface{}{"content": content}
 	if parentID != nil {
 		replyExtras["parent_id"] = *parentID
@@ -517,6 +593,7 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 	if parentID != nil {
 		var parentAuthorID string
 		if err := db.QueryRow("SELECT user_id FROM replies WHERE id=$1", *parentID).Scan(&parentAuthorID); err == nil {
+			// Don't double-notify if the parent author is also the post author.
 			if parentAuthorID != userID && parentAuthorID != authorID {
 				CreateNotificationWithExtras(parentAuthorID, userID, "REPLY", postID, replyExtras)
 			}
@@ -525,6 +602,10 @@ func CreateReply(userID, postID, content string, parentID *string) (string, erro
 
 	return replyID, nil
 }
+
+// ============================================================================
+// DATA RETRIEVAL: FEEDS & COLLECTIONS
+// ============================================================================
 
 type Reply struct {
 	ID        string    `json:"id"`
@@ -535,13 +616,14 @@ type Reply struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// GetPostReplies retrieves all responses for a single thread.
 func GetPostReplies(postID string) ([]Reply, error) {
 	rows, err := db.Query(`
-		SELECT id, post_id, user_id, content, parent_id, created_at
-		FROM replies
-		WHERE post_id = $1
-		ORDER BY created_at ASC
-	`, postID)
+        SELECT id, post_id, user_id, content, parent_id, created_at
+        FROM replies
+        WHERE post_id = $1
+        ORDER BY created_at ASC
+    `, postID)
 	if err != nil {
 		return nil, err
 	}
@@ -558,25 +640,27 @@ func GetPostReplies(postID string) ([]Reply, error) {
 	return replies, nil
 }
 
+// GetUserPosts retrieves a paginated feed of posts from a specific author.
 func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]models.Post, error) {
+	// Complex Query: Fetches post data while checking "has_liked" and "has_reposted" for the current viewer.
 	query := `
-		SELECT 
-			p.id, 
-			p.author, 
-			p.content, 
-			p.created_at, 
-			p.updated_at,
-			(SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
-			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
-			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
-			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) as has_liked,
-			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted,
-			p.image_url
-		FROM posts p
-		WHERE p.author = $1 AND UPPER(p.visibility) = 'PUBLIC'
-		ORDER BY p.created_at DESC
-		LIMIT $3 OFFSET $4
-	`
+        SELECT
+            p.id,
+            p.author,
+            p.content,
+            p.created_at,
+            p.updated_at,
+            (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+            (SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
+            (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
+            EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) as has_liked,
+            EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted,
+            p.image_url
+        FROM posts p
+        WHERE p.author = $1 AND UPPER(p.visibility) = 'PUBLIC'
+        ORDER BY p.created_at DESC
+        LIMIT $3 OFFSET $4
+    `
 
 	rows, err := db.Query(query, targetUserID, viewerUserID, limit, offset)
 	if err != nil {
@@ -605,25 +689,26 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 	return posts, nil
 }
 
+// GetRecentPosts returns the global "Public Timeline".
 func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 	query := `
-		SELECT 
-			p.id, 
-			p.author, 
-			p.content, 
-			p.created_at, 
-			p.updated_at,
-			(SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
-			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
-			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
-			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
-			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
-			p.image_url
-		FROM posts p
-		WHERE UPPER(p.visibility) = 'PUBLIC'
-		ORDER BY p.created_at DESC
-		LIMIT $2
-	`
+        SELECT
+            p.id,
+            p.author,
+            p.content,
+            p.created_at,
+            p.updated_at,
+            (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+            (SELECT COUNT(*) FROM replies WHERE post_id = p.id) as reply_count,
+            (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as repost_count,
+            EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
+            EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
+            p.image_url
+        FROM posts p
+        WHERE UPPER(p.visibility) = 'PUBLIC'
+        ORDER BY p.created_at DESC
+        LIMIT $2
+    `
 
 	rows, err := db.Query(query, viewerUserID, limit)
 	if err != nil {
@@ -662,19 +747,19 @@ type UserReply struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// GetUserReplies returns replies written by userID, with the parent post included.
+// GetUserReplies returns replies written by userID, with the parent post included for UI context.
 func GetUserReplies(userID string, limit, offset int) ([]UserReply, error) {
 	rows, err := db.Query(`
-		SELECT r.id, r.post_id,
-		       COALESCE(p.content, '') AS post_content,
-		       COALESCE(p.author,  '') AS post_author,
-		       r.content, r.created_at
-		FROM replies r
-		LEFT JOIN posts p ON p.id = r.post_id
-		WHERE r.user_id = $1
-		ORDER BY r.created_at DESC
-		LIMIT $2 OFFSET $3
-	`, userID, limit, offset)
+        SELECT r.id, r.post_id,
+               COALESCE(p.content, '') AS post_content,
+               COALESCE(p.author,  '') AS post_author,
+               r.content, r.created_at
+        FROM replies r
+        LEFT JOIN posts p ON p.id = r.post_id
+        WHERE r.user_id = $1
+        ORDER BY r.created_at DESC
+        LIMIT $2 OFFSET $3
+    `, userID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -691,21 +776,21 @@ func GetUserReplies(userID string, limit, offset int) ([]UserReply, error) {
 	return replies, rows.Err()
 }
 
-// GetUserLikedPosts returns posts liked by userID.
+// GetUserLikedPosts returns a collection of posts that a specific user has liked.
 func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models.Post, error) {
 	rows, err := db.Query(`
-		SELECT p.id, p.author, p.content, p.created_at, p.updated_at,
-		       (SELECT COUNT(*) FROM likes  WHERE post_id = p.id) AS like_count,
-		       (SELECT COUNT(*) FROM replies WHERE post_id = p.id) AS reply_count,
-		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
-		       EXISTS(SELECT 1 FROM likes  WHERE post_id = p.id AND user_id = $2) AS has_liked,
-		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted
-		FROM posts p
-		INNER JOIN likes l ON l.post_id = p.id
-		WHERE l.user_id = $1
-		ORDER BY p.created_at DESC
-		LIMIT $3 OFFSET $4
-	`, userID, viewerUserID, limit, offset)
+        SELECT p.id, p.author, p.content, p.created_at, p.updated_at,
+               (SELECT COUNT(*) FROM likes  WHERE post_id = p.id) AS like_count,
+               (SELECT COUNT(*) FROM replies WHERE post_id = p.id) AS reply_count,
+               (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
+               EXISTS(SELECT 1 FROM likes  WHERE post_id = p.id AND user_id = $2) AS has_liked,
+               EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted
+        FROM posts p
+        INNER JOIN likes l ON l.post_id = p.id
+        WHERE l.user_id = $1
+        ORDER BY p.created_at DESC
+        LIMIT $3 OFFSET $4
+    `, userID, viewerUserID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -726,6 +811,11 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 	return posts, rows.Err()
 }
 
+// ============================================================================
+// NOTIFICATION PIPELINE
+// ============================================================================
+
+// CreateNotification is a wrapper for basic events (Follow, Like, Mention).
 func CreateNotification(recipientID, actorID, typeStr, entityID string) error {
 	return CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID, nil)
 }
@@ -734,31 +824,35 @@ func CreateNotification(recipientID, actorID, typeStr, entityID string) error {
 // extras can carry "content", "parent_id", "server_name", "to" for richer AS2 objects.
 // If the recipient is on a different server the notification is delivered federatedly.
 func CreateNotificationWithExtras(recipientID, actorID, typeStr, entityID string, extras map[string]interface{}) error {
-	// Build the AS2 payload first (needed for both local and federated paths).
+	// 1. AS2 PAYLOAD GENERATION
+	// Build the ActivityStreams 2.0 payload first (needed for both local and federated paths).
 	as2Bytes, as2Err := BuildActivityStream(actorID, typeStr, entityID, extras)
 	if as2Err != nil {
 		log.Printf("Warning: could not build ActivityStream for %s/%s: %v", typeStr, entityID, as2Err)
 	}
 
-	// Detect cross-server recipients and deliver federatedly.
+	// 2. FEDERATION DETECTION
+	// Detect cross-server recipients and deliver federatedly via background worker.
 	if isFed, _ := IsFederatedUser(recipientID); isFed {
 		go DeliverFederatedNotification(recipientID, actorID, typeStr, entityID, as2Bytes)
 		return nil
 	}
 
-	// Local recipient — store in DB.
+	// 3. LOCAL STORAGE
+	// Local recipient — store in the PostgreSQL `notifications` table.
 	if as2Err != nil {
-		// Fall back: insert without activity_stream
+		// Fallback: If AS2 generation failed, insert a skeleton notification to ensure
+		// the user still sees the event.
 		_, err := db.Exec(`
-			INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
-			VALUES ($1, $2, $3, $4, NOW())
-		`, recipientID, actorID, typeStr, entityID)
+            INSERT INTO notifications (recipient_id, actor_id, type, entity_id, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
+        `, recipientID, actorID, typeStr, entityID)
 		return err
 	}
 
 	_, err := db.Exec(`
-		INSERT INTO notifications (recipient_id, actor_id, type, entity_id, activity_stream, created_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
-	`, recipientID, actorID, typeStr, entityID, as2Bytes)
+        INSERT INTO notifications (recipient_id, actor_id, type, entity_id, activity_stream, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+    `, recipientID, actorID, typeStr, entityID, as2Bytes)
 	return err
 }

@@ -14,28 +14,48 @@ import (
 )
 
 // ============================================================================
-// DATA STRUCTURES
+// DATA STRUCTURES: FEDERATED MESSAGE PROTOCOL
 // ============================================================================
 
 // FederatedMessageRequest is the standard envelope for cross-server communication.
 // It encapsulates the message content along with metadata required for verification
 // and routing. This struct is marshaled to JSON and sent over HTTP POST.
+//
+// DESIGN NOTE: This structure is designed to be "Self-Describing". A remote server
+// can verify the integrity and origin of the payload without needing additional
+// round-trips to the sender, provided they already have the sender server's public key.
 type FederatedMessageRequest struct {
-	FromUserID string `json:"from_user_id"` // The sender's full ID (e.g., alice@server_a)
-	ToUserID   string `json:"to_user_id"`   // The recipient's full ID (e.g., bob@server_b)
-	Content    string `json:"content"`      // The actual message text or encrypted payload
-	Timestamp  string `json:"timestamp"`    // ISO-8601 formatted UTC time to prevent replay attacks
-	Signature  string `json:"signature"`    // Cryptographic proof that this message originated from the sender server
-	ServerID   string `json:"server_id"`    // The unique identifier of the originating server
+	// FromUserID is the globally unique Actor ID (e.g., alice@server_a).
+	FromUserID string `json:"from_user_id"`
+
+	// ToUserID is the globally unique Recipient ID (e.g., bob@server_b).
+	ToUserID string `json:"to_user_id"`
+
+	// Content is the raw or encrypted message body. In a production fediverse
+	// implementation, this would typically follow ActivityStreams 2.0.
+	Content string `json:"content"`
+
+	// Timestamp is used for 'Replay Attack' protection. Receiving servers
+	// should reject messages where the timestamp is too old (e.g., > 5 mins).
+	Timestamp string `json:"timestamp"`
+
+	// Signature is a Hex-encoded Ed25519 digital signature.
+	Signature string `json:"signature"`
+
+	// ServerID identifies the physical server node that performed the signing.
+	ServerID string `json:"server_id"`
 }
 
 // ============================================================================
-// OUTBOUND MESSAGING LOGIC
+// OUTBOUND MESSAGING LOGIC: THE DISPATCHER
 // ============================================================================
 
 // DeliverFederatedMessage handles the complexity of sending a message to a foreign server.
 // It involves server discovery, identity verification (trust establishment),
 // cryptographic signing of the payload, and reliable network delivery.
+//
+// ARCHITECTURE FLOW:
+// 1. Host Extraction -> 2. Trust Lookup -> 3. Canonicalization -> 4. Signing -> 5. Delivery
 func DeliverFederatedMessage(fromUserID, toUserID, content string) error {
 	// 1. DISCOVERY PHASE:
 	// We extract the server portion of the recipient's user ID.
@@ -92,6 +112,8 @@ func DeliverFederatedMessage(fromUserID, toUserID, content string) error {
 	// We use a 10-second timeout to prevent the application from hanging if
 	// the remote server is unresponsive or the network is slow.
 	client := &http.Client{Timeout: 10 * time.Second}
+
+	// The endpoint is resolved via the remoteServer object retrieved from the Trust phase.
 	resp, err := client.Post(
 		fmt.Sprintf("%s/api/message/federated", remoteServer.Endpoint),
 		"application/json",
@@ -113,13 +135,14 @@ func DeliverFederatedMessage(fromUserID, toUserID, content string) error {
 }
 
 // ============================================================================
-// INBOUND MESSAGING LOGIC (API HANDLER)
+// INBOUND MESSAGING LOGIC: THE API HANDLER
 // ============================================================================
 
 // HandleIncomingFederatedMessage is the entry point for other servers sending messages here.
 // It acts as a gatekeeper, validating that the sender server is trusted and the recipient exists.
 func HandleIncomingFederatedMessage(w http.ResponseWriter, r *http.Request) {
 	// Standard security check: only POST requests are allowed for message delivery.
+	// This adheres to the RESTful principle that state-changing actions require POST.
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -151,6 +174,7 @@ func HandleIncomingFederatedMessage(w http.ResponseWriter, r *http.Request) {
 	// 3. SECURITY CHECK (Server Identity):
 	// Ensure the server claiming to send the message matches the user ID of the sender.
 	// This prevents one server from attempting to "spoof" users from another server.
+	// Example: Server A cannot send a message claiming to be from "user@server_c".
 	if senderServer != req.ServerID {
 		RespondWithError(w, http.StatusBadRequest, "from_user_id does not match server_id")
 		return
@@ -248,11 +272,14 @@ func StoreSentFederatedMessage(fromUserID, toUserID, content string) error {
 }
 
 // ============================================================================
-// CRYPTOGRAPHY (Ed25519)
+// CRYPTOGRAPHY: ED25519 (CURVE25519) IMPLEMENTATION
 // ============================================================================
 
 // SignMessage generates a cryptographic signature for a string payload.
 // It uses Ed25519, which is faster and more secure than older RSA algorithms.
+//
+// Ed25519 provides 128-bit security and is resistant to many common
+// side-channel attacks and random-number generator issues.
 func SignMessage(payload string) (string, error) {
 	// Retrieve the private key from the environment.
 	// Private keys should NEVER be hardcoded or checked into version control.
@@ -279,6 +306,7 @@ func SignMessage(payload string) (string, error) {
 // This allows us to prove that a message hasn't been tampered with and truly came from the owner of the key.
 func VerifyMessageSignature(payload, signatureHex, publicKeyHex string) bool {
 	// 1. DECODE PUBLIC KEY:
+	// Public keys are shared across the federation to verify outbound signatures.
 	publicKeyBytes, err := hex.DecodeString(publicKeyHex)
 	if err != nil {
 		log.Printf("Failed to decode public key: %v", err)
@@ -293,12 +321,14 @@ func VerifyMessageSignature(payload, signatureHex, publicKeyHex string) bool {
 	}
 
 	// 3. CRYPTOGRAPHIC VERIFICATION:
+	// Performs the Ed25519 verification check. Returns true only if the
+	// payload matches the signature for the provided public key.
 	publicKey := ed25519.PublicKey(publicKeyBytes)
 	return ed25519.Verify(publicKey, []byte(payload), signatureBytes)
 }
 
 // ============================================================================
-// FEDERATION UTILITIES
+// FEDERATION UTILITIES: DOMAIN RESOLUTION
 // ============================================================================
 
 // IsFederatedUser determines if a given UserID belongs to this server or a remote one.

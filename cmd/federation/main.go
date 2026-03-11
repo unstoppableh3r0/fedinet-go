@@ -28,6 +28,7 @@ func main() {
 
 	// Initialize database
 	federation.InitDB()
+	federation.ApplyMigrations()
 
 	// ── Background workers ────────────────────────────────────────────────────
 	// Retry worker: drain delivery_attempts every 30 seconds

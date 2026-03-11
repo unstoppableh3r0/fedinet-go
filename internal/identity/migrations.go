@@ -1,10 +1,41 @@
 package identity
 
 import (
+	"embed"
 	"log"
+	"path/filepath"
+	"sort"
 )
 
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
+
 func ApplyMigrations() {
+	// Execute embedded SQL files first
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		log.Printf("Warning: Failed to read migration directory: %v", err)
+	} else {
+		var files []string
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".sql" {
+				files = append(files, entry.Name())
+			}
+		}
+		sort.Strings(files)
+
+		for _, file := range files {
+			content, err := migrationFiles.ReadFile("migrations/" + file)
+			if err != nil {
+				log.Printf("Warning: Failed to read migration %s: %v", file, err)
+				continue
+			}
+			log.Printf("Applying identity migration: %s", file)
+			if _, err := db.Exec(string(content)); err != nil {
+				log.Printf("Migration Warning (%s) - might already exist: %v", file, err)
+			}
+		}
+	}
 	schemas := []string{
 
 		`CREATE TABLE IF NOT EXISTS likes (

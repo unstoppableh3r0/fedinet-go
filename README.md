@@ -210,3 +210,9 @@ CREATE DATABASE fedinet_timeline;
 ```
 
 Then set `DATABASE_URL` accordingly.
+
+
+
+## Development Notes
+
+- Working on ActivityPub federation improvements.

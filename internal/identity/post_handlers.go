@@ -16,6 +16,18 @@ import (
 
 // canViewPost checks whether viewerID is allowed to interact with the given post.
 // It enforces visibility (PUBLIC / FOLLOWERS / CLOSE_FRIENDS) and mutual block rules.
+//
+// Visibility rules:
+//   - PUBLIC:        Any authenticated user can see the post (and like/reply/repost it).
+//   - FOLLOWERS:     Only users who follow the author can access the post.
+//   - CLOSE_FRIENDS: Only users explicitly added to the author's close-friends list can access it.
+//
+// Block semantics are bidirectional: if either party has blocked the other, the viewer
+// is denied access regardless of visibility level. This prevents harassers from
+// interacting with a user even if that user's posts are public.
+//
+// Returns (allowed bool, authorID string). authorID is always returned even on denial
+// so callers can use it (e.g. to log the author) without a second DB query.
 func canViewPost(viewerID, postID string) (bool, string) {
 	var authorID, visibility string
 	err := db.QueryRow("SELECT author, visibility FROM posts WHERE id = $1", postID).
@@ -61,6 +73,15 @@ func canViewPost(viewerID, postID string) (bool, string) {
 
 // ToggleLikeHandler handles POST /post/like
 // Body: { "user_id": "...", "post_id": "..." }
+//
+// This handler is idempotent: calling it when the post is already liked will unlike it,
+// and calling it when the post is not liked will like it (toggle semantics). This makes
+// client-side retry safe — a double-tap cannot leave a post in a permanently liked state.
+//
+// Access control:
+//   - The viewer must be able to see the post (canViewPost) before they are allowed to like it.
+//     This prevents cross-visibility interaction leakage (e.g. a non-follower liking a
+//     FOLLOWERS-only post).
 func ToggleLikeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -99,6 +120,16 @@ func ToggleLikeHandler(w http.ResponseWriter, r *http.Request) {
 
 // ToggleRepostHandler handles POST /post/repost
 // Body: { "user_id": "...", "post_id": "..." }
+//
+// Repost constraints enforced here (beyond the basic visibility check):
+//   - FOLLOWERS-only and CLOSE_FRIENDS posts cannot be reposted under any circumstances.
+//     Allowing reposts of restricted posts would effectively make them public, defeating
+//     the author's privacy intent.
+//   - If the author has enabled the "disable_resharing" privacy setting, reposting is
+//     blocked even for PUBLIC posts.
+//   - Un-reposting (removing a previously created repost) is always allowed, even if
+//     the visibility or resharing rules would now block a new repost. This lets users
+//     clean up old reposts without hitting permission errors.
 func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -160,6 +191,22 @@ func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreatePostHandler handles user posts
+//
+// The creation pipeline goes through the following numbered steps (annotated in the function body):
+//
+//	A. AI moderation  — content is scored for toxicity, hate, spam, and threats.
+//	                    A SAFE recommendation allows the post through; anything else
+//	                    sets visibility to HIDDEN and queues the post for human review.
+//	B. Visibility     — the user's requested level (PUBLIC / FOLLOWERS / CLOSE_FRIENDS)
+//	                    is validated and may be overridden to HIDDEN by the AI result.
+//	C. Expiry parsing — optional ephemeral post support; accepts shorthand ("1h", "3d")
+//	                    as well as explicit RFC 3339 timestamps.
+//	D. Group ID       — a UUID that ties the origin post to its cross-server replicas,
+//	                    enabling de-duplication in federated feeds.
+//	E. Origin post    — the row is inserted in the posts table; the post then
+//	                    back-fills its own origin_post reference.
+//	F. Fan-out        — if linked_targets are specified, the post is replicated
+//	                    asynchronously to each target server via fanOutLinkedPost.
 func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
@@ -322,6 +369,18 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 
 // fanOutLinkedPost sends a linked-post replication request to each target server
 // that supports the linked_posts capability. Runs in a goroutine.
+//
+// Called after the origin post is successfully saved. For each target URL this function:
+//  1. Checks capability negotiation — servers that have not advertised "linked_posts"
+//     support are silently skipped (graceful degradation, not an error).
+//  2. Serialises the post payload (group_id, origin references, content, visibility,
+//     optional image/expiry/content-warning fields) as JSON.
+//  3. Attaches the local server's federation signature headers (X-Server-ID,
+//     X-Signature, X-Timestamp) so the recipient can verify authenticity.
+//  4. POSTs to the remote /federation/linked-post endpoint with a 10-second timeout.
+//
+// Individual delivery failures are logged but do not fail the goroutine; other
+// targets continue to receive the post even if one is unreachable.
 func fanOutLinkedPost(
 	authorUserID, originPostID, groupID, originServerURL string,
 	content string, imageURL *string,
@@ -377,7 +436,15 @@ func fanOutLinkedPost(
 }
 
 // GetRecentPostsHandler handles GET /posts/recent
-// Query params: limit (optional, default 20), user_id (optional, for has_liked/has_reposted)
+// Query params: limit (optional, default 20, max 100), user_id (optional, for has_liked/has_reposted)
+//
+// Returns the most recently created PUBLIC posts ordered by created_at descending.
+// If viewer user_id is provided, the response includes has_liked and has_reposted boolean
+// fields so the client can render the correct like/repost button state without extra round-trips.
+//
+// This endpoint does NOT filter by follow graph — it is a global timeline intended for
+// discovery and the "Explore" feed. Personalised feeds (following-only) are served by
+// the federated_feed package.
 func GetRecentPostsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -740,7 +807,17 @@ func GetUserRepostedPostsHandler(w http.ResponseWriter, r *http.Request) {
 
 // DeletePostHandler handles POST /post/delete
 // Body: { "user_id": "...", "post_id": "..." }
-// The caller must own the post; the request must carry a valid Authorization JWT.
+//
+// This is a destructive operation and requires a valid Authorization JWT.
+// The JWT is checked for two things:
+//  1. It must be structurally valid and not expired (ValidateUserToken).
+//  2. The UserID embedded in the JWT claims must match the user_id in the body.
+//     This prevents a user from deleting another user's post even if they hold
+//     a valid token for a different account.
+//
+// After successful deletion, the post row is hard-deleted from the posts table.
+// Cascade deletes (via FK constraints or triggers) clean up related likes, reposts,
+// replies, and moderation flags automatically.
 func DeletePostHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -786,7 +863,14 @@ func DeletePostHandler(w http.ResponseWriter, r *http.Request) {
 
 // EditPostHandler handles POST /post/edit
 // Body: { "user_id": "...", "post_id": "...", "content": "..." }
-// Only the post author may edit; requires a valid Authorization JWT.
+//
+// Editing is restricted to the post author and requires the same JWT proof-of-ownership
+// as DeletePostHandler. Only the text content of the post can be changed; image_url,
+// visibility, and created_at are preserved. The edit is applied as an in-place UPDATE
+// rather than a soft-delete + re-insert, so the post retains its original ID, like/repost
+// counts, and reply thread structure.
+//
+// Note: there is currently no edit-history table. The pre-edit content is not retained.
 func EditPostHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")

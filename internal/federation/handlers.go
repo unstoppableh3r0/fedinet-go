@@ -1,3 +1,25 @@
+// Package federation implements the HTTP handlers and business logic for the
+// inter-server federation layer of the fedinated social network.
+//
+// Federation allows users homed on different servers to follow each other, receive
+// notifications, and interact with posts across server boundaries. The federation
+// layer communicates via an HTTP-based ActivityPub-inspired protocol with signed
+// requests for authenticity guarantees.
+//
+// Key responsibilities of this package:
+//   - Verifying inbound HTTP signatures from remote servers (VerifySignatureMiddleware).
+//   - Routing inbound activities (follows, likes, reposts, notifications) via InboxHandler.
+//   - Publishing outbound activities to remote servers via SendActivityHandler.
+//   - Advertising and discovering per-server capability sets (CapabilitiesHandler).
+//   - Managing the trusted-server registry (HandshakeHandler, InitiateHandshakeHandler).
+//   - Blocking/unblocking remote servers from federating with this node.
+//   - Exposing a federation health-check endpoint with delivery statistics.
+//
+// Security model:
+// All inbound federation requests must carry an HTTP Signature header signed with the
+// remote server's RSA private key. The corresponding public key is resolved either from
+// the local trusted_servers table or via a live WebFinger-style lookup. Unsigned
+// requests are rejected with 401 Unauthorized.
 package federation
 
 import (
@@ -16,6 +38,19 @@ import (
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
+// SignatureParams carries the parsed components of an HTTP Signature header.
+// The header conforms to the draft-cavage-http-signatures specification:
+//
+//	Signature: keyId="<id>",algorithm="<alg>",headers="<h1> <h2>",signature="<base64>"
+//
+// Fields:
+//   - KeyID:     identifier for the public key used to create the signature (typically
+//     a server ID or actor URL). Used to look up the corresponding public key.
+//   - Algorithm: signing algorithm string (e.g. "rsa-sha256"). Validated against
+//     the actual key material before verification.
+//   - Headers:   ordered list of header names (and pseudo-headers such as
+//     "(request-target)") whose values were included in the signing string.
+//   - Signature: base64-encoded raw signature bytes.
 type SignatureParams struct {
 	KeyID     string
 	Algorithm string
@@ -23,6 +58,15 @@ type SignatureParams struct {
 	Signature string
 }
 
+// ParseSignatureHeader parses the value of an HTTP "Signature" header into its
+// constituent components. The expected format is a comma-separated list of
+// key="value" pairs, for example:
+//
+//	keyId="server-a",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="Base64=="
+//
+// Parsing is lenient with whitespace but strict about required fields: keyId,
+// signature, and at least one header name must be present or an error is returned.
+// The function does not validate the signature itself — that is done by VerifySignatureMiddleware.
 func ParseSignatureHeader(header string) (*SignatureParams, error) {
 	params := &SignatureParams{}
 	parts := strings.Split(header, ",")
@@ -47,6 +91,18 @@ func ParseSignatureHeader(header string) (*SignatureParams, error) {
 	return params, nil
 }
 
+// FetchServerPublicKey resolves the public key for a given keyId.
+// It searches three sources in priority order:
+//
+//  1. identities table — covers local users whose keyId is their user_id.
+//  2. trusted_servers table — covers remote servers that have previously completed
+//     a handshake and whose key was persisted locally (fastest path for known peers).
+//  3. server_identity table — covers the local server's own identity record.
+//  4. Live WebFinger/ActivityPub lookup via ResolveAccount — fallback for previously
+//     unseen remote servers. The resolved key is NOT automatically cached here;
+//     callers that need caching should call HandshakeHandler first.
+//
+// Returns the PEM-encoded public key string, or an error if resolution fails.
 func FetchServerPublicKey(keyID string) (string, error) {
 
 	var publicKey string
@@ -79,6 +135,23 @@ func FetchServerPublicKey(keyID string) (string, error) {
 	return doc.Identity.PublicKey, nil
 }
 
+// VerifySignatureMiddleware is an HTTP middleware that enforces HTTP Signature
+// authentication on every request it wraps. It must be applied to all inbound
+// federation endpoints to ensure that only trusted, authenticated peers can
+// deliver activities to this server.
+//
+// Verification steps performed on each request:
+//  1. Parse the Signature header using ParseSignatureHeader.
+//  2. Resolve the sender's public key via FetchServerPublicKey.
+//  3. Read and buffer the request body so that the Digest pseudo-header can be
+//     verified and the body can be re-read by downstream handlers.
+//  4. Reconstruct the signing string from the listed headers in the same order
+//     they were signed (including "(request-target)", "host", "date", "digest").
+//  5. Verify the signature bytes against the reconstructed string using the
+//     sender's public key via the pkg/crypto package.
+//
+// Requests that fail any step are rejected with 401 Unauthorized before the
+// wrapped handler is ever called.
 func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sigHeader := r.Header.Get("Signature")
@@ -102,6 +175,8 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		// Buffer the request body so downstream handlers can still read it after
+		// we've consumed it here for the Digest verification step.
 		var bodyBytes []byte
 		if r.Body != nil {
 			bodyBytes, err = io.ReadAll(r.Body)
@@ -110,13 +185,17 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 					"Failed to read request body", err.Error())
 				return
 			}
+			// Restore body for downstream handler consumption.
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
 
+		// Rebuild the signing string exactly as the sender did.
+		// Order matters: we iterate params.Headers in the same sequence.
 		var signingParts []string
 		for _, h := range params.Headers {
 			switch h {
 			case "(request-target)":
+				// The request-target pseudo-header is "METHOD /path?query" lowercased.
 				requestTarget := strings.ToLower(r.Method) + " " + r.URL.RequestURI()
 				signingParts = append(signingParts, "(request-target): "+requestTarget)
 			case "host":
@@ -124,7 +203,8 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			case "date":
 				signingParts = append(signingParts, "date: "+r.Header.Get("Date"))
 			case "digest":
-
+				// Compute SHA-256 of the buffered body and compare against the
+				// sender's Digest header to detect in-flight tampering.
 				digest := sha256.Sum256(bodyBytes)
 				computedDigest := "SHA-256=" + hex.EncodeToString(digest[:])
 				receivedDigest := r.Header.Get("Digest")
@@ -135,7 +215,7 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				}
 				signingParts = append(signingParts, "digest: "+computedDigest)
 			default:
-
+				// Any other listed header is included verbatim (lowercase name, original value).
 				signingParts = append(signingParts, h+": "+r.Header.Get(http.CanonicalHeaderKey(h)))
 			}
 		}
@@ -158,6 +238,19 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// InboxHandler handles POST /federation/inbox — the primary inbound activity endpoint.
+//
+// This endpoint receives federated activities (Follow, Like, Repost, Create, Delete, etc.)
+// from remote servers. Each payload is first screened by the AI moderation service to
+// catch cross-server spam or harmful content before it is stored locally. Activities
+// that pass moderation are forwarded to ProcessInboundActivity which routes them to
+// the appropriate domain-specific handler (follow acceptance, notification creation, etc.).
+//
+// Error responses:
+//   - 403 Forbidden:        sender server is on the local block list.
+//   - 429 Too Many Requests: the sender has exceeded its configured rate limit.
+//   - 400 Bad Request:       required envelope fields (activity_type, actor, actor_server) are missing.
+//   - 500 Internal Server Error: unexpected processing failure.
 func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -213,6 +306,10 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// OutboxHandler handles GET /federation/outbox?actor_id=<id>.
+// It returns the last 50 outbound activities published by the given actor,
+// allowing remote servers to backfill the local activity history of a user
+// (e.g. after a follow is accepted). Useful for replay/catch-up scenarios.
 func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -240,6 +337,13 @@ func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// SendActivityHandler handles POST /federation/send.
+// It enqueues an outbound activity for delivery to a specific remote server.
+// The activity is persisted to the outbox table and dispatched asynchronously
+// by the delivery retry system, which handles transient failures with exponential backoff.
+//
+// Required body fields: activity_type, actor_id, target_server, payload.
+// Optional: target_id (specific entity on the remote server, e.g. a post ID).
 func SendActivityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -282,6 +386,10 @@ func SendActivityHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AcknowledgmentHandler handles POST /federation/ack.
+// Remote servers call this endpoint to notify us about the delivery outcome of
+// an activity we sent them. The status can be "delivered", "failed", or "rejected".
+// Delivery tracking data is used by the health dashboard and retry scheduler.
 func AcknowledgmentHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -308,6 +416,14 @@ func AcknowledgmentHandler(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, http.StatusOK, "Acknowledgment recorded", nil)
 }
 
+// CapabilitiesHandler handles GET /federation/capabilities.
+// It advertises what optional federation features this server supports, such as:
+//   - linked_posts: the server can receive cross-server post replications.
+//   - ephemeral_posts: the server honours expiry timestamps on posts.
+//   - close_friends: the server supports CLOSE_FRIENDS visibility level.
+//
+// Remote servers call this endpoint before sending certain activity types to
+// determine whether the target understands and will honour the feature.
 func CapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")
@@ -528,6 +644,20 @@ func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, http.StatusOK, "Rate limit configured", nil)
 }
 
+// HandshakeHandler handles POST /federation/handshake.
+// This is the receiver side of the mutual TLS-less trust establishment protocol.
+// When a remote server wants to federate with this node it calls this endpoint,
+// providing its server_id, server_name, public_key, and endpoint URL.
+//
+// On receipt, we:
+//  1. Persist the remote server's public key in our trusted_servers table so
+//     subsequent signed requests from it can be verified without a live lookup.
+//  2. Respond with our own identity (server_id, server_name, public_key) so the
+//     remote server can reciprocally trust us.
+//
+// Note: handshakes are unauthenticated (the trust is established here, not before).
+// The public key supplied by the requester is trusted optimistically; operators who
+// need stronger guarantees should use an allow-list or require manual approval.
 func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")
@@ -552,6 +682,9 @@ func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Upsert the remote server into trusted_servers.
+	// Using ON CONFLICT DO UPDATE ensures re-handshakes (e.g. after key rotation)
+	// update the stored key rather than failing.
 	_, err := db.Exec(`
 		INSERT INTO trusted_servers (server_id, server_name, public_key, endpoint)
 		VALUES ($1, $2, $3, $4)
@@ -696,6 +829,9 @@ func InitiateHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sendSuccess writes a JSON success envelope to w with the given HTTP status code.
+// All federation handlers that succeed use this helper to ensure a consistent
+// response shape: { success: true, message: "...", data: {...} }.
 func sendSuccess(w http.ResponseWriter, statusCode int, message string, data map[string]interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
@@ -709,6 +845,12 @@ func sendSuccess(w http.ResponseWriter, statusCode int, message string, data map
 	json.NewEncoder(w).Encode(response)
 }
 
+// sendError writes a JSON error envelope to w and logs the error details.
+// The error shape mirrors the FederationResponse model with Success=false.
+// errorType is a machine-readable code (e.g. "missing_fields") that clients
+// can use for programmatic error handling without parsing the human message.
+// details carries implementation-level context (e.g. wrapped Go errors) and
+// should be omitted from responses sent to untrusted callers in production.
 func sendError(w http.ResponseWriter, statusCode int, errorType, message, details string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
@@ -728,6 +870,12 @@ func sendError(w http.ResponseWriter, statusCode int, errorType, message, detail
 	log.Printf("Error [%s]: %s - %s", errorType, message, details)
 }
 
+// HandleFederatedLookup handles GET /federation/lookup?id=<handle>.
+// It resolves a user handle (e.g. "alice@server-a.example") to its full identity
+// document (public key, profile metadata) by querying the local database first and
+// falling back to a live remote lookup. This endpoint is consumed by remote servers
+// that need to verify the identity of a user before accepting follow requests or
+// cryptographically signed activities from that user.
 func HandleFederatedLookup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only GET allowed", "")

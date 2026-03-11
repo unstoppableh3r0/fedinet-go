@@ -1,11 +1,13 @@
 package identity
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
 
+	aimoderation "github.com/unstoppableh3r0/fedinet-go/internal/ai-moderation-service"
 	"github.com/unstoppableh3r0/fedinet-go/pkg/models"
 )
 
@@ -71,9 +73,9 @@ func ToggleRepostHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "ok"})
 }
 
-// CreatePostHandler handles POST /post/create
-// Body: { "user_id": "...", "content": "..." }
+// CreatePostHandler handles user posts
 func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
+
 	if r.Method != http.MethodPost {
 		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -84,24 +86,95 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 		Content  string  `json:"content"`
 		ImageURL *string `json:"image_url"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+
 	if req.UserID == "" || (req.Content == "" && req.ImageURL == nil) {
 		RespondWithError(w, http.StatusBadRequest, "missing user_id or content")
 		return
 	}
 
+	// ⭐ STEP A — AI MODERATION
+	aiResult, err := aimoderation.CallModerationAPI(req.Content)
+	if err != nil {
+		log.Println("AI moderation failed, continuing without AI:", err)
+
+		// fallback safe response
+		aiResult = &aimoderation.ModerationResponse{
+			Toxicity:       0.0,
+			Hate:           0.0,
+			Spam:           0.0,
+			Threat:         0.0,
+			Confidence:     0.0,
+			Recommendation: "SAFE",
+		}
+	}
+
+	// ⭐ STEP B — FLAG AND DETERMINE VISIBILITY
+	visibility := "PUBLIC"
+	if aiResult.Recommendation != "SAFE" {
+		visibility = "HIDDEN"
+	}
+
+	// ⭐ STEP C — SAVE POST
 	internalUserID := ToInternalID(req.UserID)
-	postID, err := CreatePost(internalUserID, req.Content, req.ImageURL)
+
+	postID, err := CreatePost(internalUserID, req.Content, req.ImageURL, visibility)
 	if err != nil {
 		log.Printf("CreatePost error for user %s: %v", internalUserID, err)
 		RespondWithError(w, http.StatusInternalServerError, "failed to create post")
 		return
 	}
 
-	RespondWithJSON(w, http.StatusCreated, map[string]string{"post_id": postID})
+	// Ensure that if the post is hidden we explicitly inform the frontend gracefully
+	if visibility == "HIDDEN" {
+		RespondWithJSON(w, http.StatusAccepted, map[string]interface{}{
+			"status":     "post_flagged_and_hidden",
+			"post_id":    postID,
+			"moderation": aiResult,
+		})
+		return
+	}
+
+	go func() {
+
+		message := map[string]interface{}{
+			"activity_type": "Create",
+			"actor_id":      req.UserID,
+			"target_server": "http://server_b_federation:8081",
+			"payload": map[string]interface{}{
+				"type":    "Create",
+				"post_id": postID,
+				"content": req.Content,
+				"moderation": map[string]interface{}{
+					"origin_server": true,
+				},
+			},
+		}
+
+		jsonData, _ := json.Marshal(message)
+
+		resp, err := http.Post(
+			"http://server_a_federation:8081/federation/send",
+			"application/json",
+			bytes.NewBuffer(jsonData),
+		)
+
+		if err != nil {
+			log.Println("Federation HTTP error:", err)
+			return
+		}
+
+		log.Println("Federation response:", resp.Status)
+	}()
+
+	RespondWithJSON(w, http.StatusCreated, map[string]interface{}{
+		"post_id":    postID,
+		"moderation": aiResult,
+	})
 }
 
 // GetRecentPostsHandler handles GET /posts/recent

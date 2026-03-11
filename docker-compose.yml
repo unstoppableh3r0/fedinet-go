@@ -19,5 +19,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── ML Moderation Microservice ─────────────────────────────────────────────
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: ml-service
+    ports:
+      - "8090:8090"
+    environment:
+      API_KEY: ${AI_MODERATION_API_KEY:-changeme}
+      PORT: 8090
+      FEEDBACK_FILE: /data/feedback.jsonl
+    volumes:
+      - ml_feedback:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s   # model download can take time on first run
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  ml_feedback:

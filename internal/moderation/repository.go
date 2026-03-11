@@ -29,6 +29,9 @@ type Repository interface {
 
 	SaveBackupMetadata(*models.BackupMetadata) error
 	ListBackups() ([]models.BackupMetadata, error)
+	GetModerationQueue() ([]map[string]interface{}, error)
+	UpdateReviewStatus(contentID string, status string) error
+	UpdatePostVisibility(postID string, visibility string) error
 }
 
 type repository struct {
@@ -495,4 +498,57 @@ func (r *repository) ListBackups() ([]models.BackupMetadata, error) {
 	}
 
 	return backups, rows.Err()
+}
+
+func (r *repository) GetModerationQueue() ([]map[string]interface{}, error) {
+	query := `
+		SELECT content_id, content_type,
+		       toxicity_score, recommendation, review_status
+		FROM moderation_results
+		WHERE review_status = 'PENDING'
+		ORDER BY toxicity_score DESC
+	`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		var id, ctype, rec, status string
+		var toxicity float64
+
+		if err := rows.Scan(&id, &ctype, &toxicity, &rec, &status); err != nil {
+			return nil, err
+		}
+
+		results = append(results, map[string]interface{}{
+			"content_id":     id,
+			"type":           ctype,
+			"toxicity":       toxicity,
+			"recommendation": rec,
+			"status":         status,
+		})
+	}
+
+	return results, rows.Err()
+}
+
+func (r *repository) UpdateReviewStatus(contentID string, status string) error {
+	_, err := r.db.Exec(`
+		UPDATE moderation_results
+		SET review_status = $1
+		WHERE content_id = $2
+	`, status, contentID)
+	return err
+}
+
+func (r *repository) UpdatePostVisibility(postID string, visibility string) error {
+	_, err := r.db.Exec(`
+		UPDATE posts 
+		SET visibility = $1 
+		WHERE id = $2
+	`, visibility, postID)
+	return err
 }

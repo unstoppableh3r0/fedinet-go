@@ -67,6 +67,26 @@ func (s *Service) ListPendingReports() ([]models.Report, error) {
 	return s.repo.ListPendingReports()
 }
 
+func (s *Service) GetModerationQueue() ([]map[string]interface{}, error) {
+	return s.repo.GetModerationQueue()
+}
+
+func (s *Service) UpdateReviewStatus(contentID string, status string) error {
+	// Update moderation_results row if it exists (may be empty for AI-flagged posts)
+	_ = s.repo.UpdateReviewStatus(contentID, status)
+
+	switch status {
+	case "APPROVED":
+		// Make the post visible to everyone
+		return s.repo.UpdatePostVisibility(contentID, "PUBLIC")
+	case "REJECTED":
+		// Permanently remove from public view — use a distinct visibility so the
+		// post never surface again in /moderation/pending (which filters on HIDDEN only)
+		return s.repo.UpdatePostVisibility(contentID, "REJECTED")
+	}
+	return nil
+}
+
 // REPORT RESOLUTION
 
 func (s *Service) ResolveReport(

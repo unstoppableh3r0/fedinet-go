@@ -245,7 +245,11 @@ func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	users, err := GetAllUsers()
 	if err != nil {
 		log.Println("Failed to get users:", err)
-		RespondWithError(w, http.StatusInternalServerError, "failed to retrieve users")
+		// Return empty list instead of 500 so the dashboard still loads
+		RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"users": []interface{}{},
+			"count": 0,
+		})
 		return
 	}
 
@@ -377,4 +381,136 @@ func GetInviteQRHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.WriteHeader(http.StatusOK)
 	w.Write(png)
+}
+
+// ── Admin dashboard snapshots ─────────────────────────────────────────────────
+
+// GetSnapshotsHandler returns historical server stat snapshots for trend charts.
+// GET /admin/snapshots
+func GetSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT id, total_users, total_posts, total_follows, captured_at
+		FROM server_snapshots
+		ORDER BY captured_at DESC
+		LIMIT 30
+	`)
+	if err != nil {
+		log.Printf("GetSnapshotsHandler: query error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch snapshots")
+		return
+	}
+	defer rows.Close()
+
+	type Snapshot struct {
+		ID           string `json:"id"`
+		TotalUsers   int    `json:"total_users"`
+		TotalPosts   int    `json:"total_posts"`
+		TotalFollows int    `json:"total_follows"`
+		CapturedAt   string `json:"captured_at"`
+	}
+
+	var snapshots []Snapshot
+	for rows.Next() {
+		var s Snapshot
+		if err := rows.Scan(&s.ID, &s.TotalUsers, &s.TotalPosts, &s.TotalFollows, &s.CapturedAt); err != nil {
+			log.Printf("GetSnapshotsHandler: scan error: %v", err)
+			continue
+		}
+		snapshots = append(snapshots, s)
+	}
+
+	if snapshots == nil {
+		snapshots = []Snapshot{}
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"snapshots": snapshots,
+		"count":     len(snapshots),
+	})
+}
+
+// SaveSnapshotHandler captures a point-in-time stat snapshot.
+// POST /admin/snapshots
+func SaveSnapshotHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var totalUsers, totalPosts, totalFollows int
+	db.QueryRow(`SELECT COUNT(*) FROM identities`).Scan(&totalUsers)
+	db.QueryRow(`SELECT COUNT(*) FROM posts WHERE visibility = 'PUBLIC'`).Scan(&totalPosts)
+	db.QueryRow(`SELECT COUNT(*) FROM follows`).Scan(&totalFollows)
+
+	var id string
+	err := db.QueryRow(`
+		INSERT INTO server_snapshots (total_users, total_posts, total_follows)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, totalUsers, totalPosts, totalFollows).Scan(&id)
+	if err != nil {
+		log.Printf("SaveSnapshotHandler: insert error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to save snapshot")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"id":            id,
+		"total_users":   totalUsers,
+		"total_posts":   totalPosts,
+		"total_follows": totalFollows,
+	})
+}
+
+// ── Admin account graph ───────────────────────────────────────────────────────
+
+// GetAccountLinksHandler returns follower/following graph edges for the admin view.
+// GET /admin/account/links
+func GetAccountLinksHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT follower_user_id, followee_user_id
+		FROM follows
+		LIMIT 500
+	`)
+	if err != nil {
+		log.Printf("GetAccountLinksHandler: query error: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to fetch account links")
+		return
+	}
+	defer rows.Close()
+
+	type Link struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+
+	var links []Link
+	for rows.Next() {
+		var l Link
+		if err := rows.Scan(&l.From, &l.To); err != nil {
+			continue
+		}
+		l.From = ToExternalID(l.From)
+		l.To = ToExternalID(l.To)
+		links = append(links, l)
+	}
+
+	if links == nil {
+		links = []Link{}
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"links": links,
+		"count": len(links),
+	})
 }

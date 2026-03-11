@@ -9,26 +9,26 @@ import (
 
 func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 	query := `
-		SELECT 
-			p.id, 
-			p.author, 
-			p.content, 
-			p.created_at, 
+		SELECT
+			p.id,
+			p.author,
+			p.content,
+			p.created_at,
 			p.updated_at,
-			COALESCE(COUNT(DISTINCT l.user_id), 0) as like_count,
-			COALESCE(COUNT(DISTINCT r.id), 0) as reply_count,
-			COALESCE(COUNT(DISTINCT rp.user_id), 0) as repost_count,
-			EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked,
-			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
+			(SELECT COUNT(*) FROM likes  WHERE post_id = p.id) AS like_count,
+			(SELECT COUNT(*) FROM replies WHERE post_id = p.id) AS reply_count,
+			(SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
+			EXISTS(SELECT 1 FROM likes  WHERE post_id = p.id AND user_id = $1) AS has_liked,
+			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) AS has_reposted,
 			p.image_url
 		FROM posts p
-		LEFT JOIN likes l ON p.id = l.post_id
-		LEFT JOIN replies r ON p.id = r.post_id
-		LEFT JOIN reposts rp ON p.id = rp.post_id
-		WHERE p.author IN (
-			SELECT followee_user_id FROM follows WHERE follower_user_id = $1
-		) OR p.author = $1
-		GROUP BY p.id, p.author, p.content, p.created_at, p.updated_at, p.image_url
+		WHERE UPPER(p.visibility) = 'PUBLIC'
+		  AND (
+			p.author = $1
+			OR p.author IN (
+				SELECT followee_user_id FROM follows WHERE follower_user_id = $1
+			)
+		  )
 		ORDER BY p.created_at DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -195,27 +195,27 @@ func GetFollowing(userID string) ([]models.UserDocument, error) {
 
 func GetConversations(userID string) ([]models.Message, error) {
 	query := `
-		WITH latest_messages AS (
-			SELECT DISTINCT ON (
-				CASE 
-					WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
-					ELSE recipient_id || '-' || sender_id
-				END
-			)
-			id, sender_id, recipient_id, content, created_at, image_url,
-			CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS other_user
-			FROM messages
-			WHERE sender_id = $1 OR recipient_id = $1
-			ORDER BY 
-				CASE 
-					WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
-					ELSE recipient_id || '-' || sender_id
-				END,
-				created_at DESC
+		SELECT DISTINCT ON (
+			CASE
+				WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
+				ELSE recipient_id || '-' || sender_id
+			END
 		)
-		SELECT id, sender_id, recipient_id, content, created_at, image_url, other_user
-		FROM latest_messages
-		ORDER BY created_at DESC
+		id,
+		sender_id      AS sender,
+		recipient_id   AS receiver,
+		content,
+		created_at,
+		image_url,
+		CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS other_user
+		FROM messages
+		WHERE sender_id = $1 OR recipient_id = $1
+		ORDER BY
+			CASE
+				WHEN sender_id < recipient_id THEN sender_id || '-' || recipient_id
+				ELSE recipient_id || '-' || sender_id
+			END,
+			created_at DESC
 		LIMIT 50
 	`
 
@@ -233,6 +233,12 @@ func GetConversations(userID string) ([]models.Message, error) {
 			log.Printf("Error scanning conversation: %v", err)
 			continue
 		}
+		// Compute OtherUser so the handler can ToExternalID it
+		if m.Sender == userID {
+			m.OtherUser = m.Receiver
+		} else {
+			m.OtherUser = m.Sender
+		}
 		conversations = append(conversations, m)
 	}
 
@@ -240,16 +246,25 @@ func GetConversations(userID string) ([]models.Message, error) {
 }
 
 func GetConversationMessages(userID, otherUserID string) ([]models.Message, error) {
+	// Also query using the external (pre-ToInternalID) form of otherUserID so
+	// that federated messages stored with the sender's original external ID are found.
+	otherUserExternal := ToExternalID(otherUserID)
+
 	query := `
-		SELECT id, sender_id, recipient_id, content, created_at, image_url
+		SELECT id,
+		       sender_id    AS sender,
+		       recipient_id AS receiver,
+		       content,
+		       created_at,
+		       image_url
 		FROM messages
-		WHERE (sender_id = $1 AND recipient_id = $2)
-		   OR (sender_id = $2 AND recipient_id = $1)
+		WHERE (sender_id = $1 AND (recipient_id = $2 OR recipient_id = $3))
+		   OR ((sender_id = $2 OR sender_id = $3) AND recipient_id = $1)
 		ORDER BY created_at ASC
 		LIMIT 100
 	`
 
-	rows, err := db.Query(query, userID, otherUserID)
+	rows, err := db.Query(query, userID, otherUserID, otherUserExternal)
 	if err != nil {
 		return nil, err
 	}

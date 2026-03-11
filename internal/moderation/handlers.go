@@ -6,13 +6,7 @@ import (
 	"strconv"
 )
 
-type Handler struct {
-	service *Service
-}
-
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
-}
+// ─── REPORT HANDLERS ─────────────────────────────────────────────────────────
 
 func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -85,7 +79,7 @@ func (h *Handler) ResolveReport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ─── USER BLOCK HANDLERS ─────────────────────────────────────────────────────
+// ─── USER BLOCK HANDLERS ──────────────────────────────────────────────────────
 
 // POST /users/block
 func (h *Handler) BlockUser(w http.ResponseWriter, r *http.Request) {

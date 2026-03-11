@@ -9,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/unstoppableh3r0/fedinet-go/internal/identity"
+
 	"github.com/unstoppableh3r0/fedinet-go/internal/privacy"
 )
 
@@ -54,6 +55,10 @@ func main() {
 
 	// Run migrations
 	identity.ApplyMigrations()
+
+	// Seed server_config and server_identity from env vars (SERVER_NAME, SERVER_ID, SERVER_URL).
+	// This overwrites the blank placeholder inserted by migrations with the real server name.
+	identity.SeedServerConfig()
 
 	// Start background workers
 	go identity.StartSessionKeyWorker()
@@ -187,6 +192,52 @@ func main() {
 	mux.Handle("/admin/trusted-servers/add", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AddTrustedServerHandler)))
 	mux.Handle("/admin/trusted-servers/remove", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RemoveTrustedServerHandler)))
 	mux.Handle("/admin/trusted-servers/test", identity.AdminAuthMiddleware(http.HandlerFunc(identity.TestTrustedServerConnectionHandler)))
+
+	// ── Admin snapshots (dashboard trend chart) ───────────────────────────────
+	mux.Handle("/admin/snapshots", identity.AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			identity.GetSnapshotsHandler(w, r)
+		} else if r.Method == http.MethodPost {
+			identity.SaveSnapshotHandler(w, r)
+		} else {
+			identity.RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	})))
+
+	// ── Admin account links (graph view) ──────────────────────────────────────
+	mux.Handle("/admin/account/links", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAccountLinksHandler)))
+
+	// ── Moderator role management (admin-only) ────────────────────────────────
+
+	mux.Handle("/admin/moderators/assign", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AssignModeratorHandler)))
+	mux.Handle("/admin/moderators/remove", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RemoveModeratorHandler)))
+	mux.Handle("/admin/moderators/list", identity.AdminAuthMiddleware(http.HandlerFunc(identity.ListModeratorsHandler)))
+
+	// ── Moderator login (public route — checked against moderator_roles table) ─
+	mux.HandleFunc("/moderator/login", identity.ModeratorLoginHandler)
+
+	// ── Moderation actions — protected by moderator OR admin JWT ─────────────
+	mux.Handle("/moderation/queue", identity.ModeratorAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.GetModerationQueue(w, r)
+	})))
+	mux.Handle("/moderation/approve", identity.ModeratorAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.ApproveContent(w, r)
+	})))
+	mux.Handle("/moderation/reject", identity.ModeratorAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.RejectContent(w, r)
+	})))
+
+	// Moderator pending posts list (queries posts table directly by visibility)
+	mux.Handle("/moderation/pending", identity.ModeratorAuthMiddleware(http.HandlerFunc(identity.GetPendingPostsHandler)))
 
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)

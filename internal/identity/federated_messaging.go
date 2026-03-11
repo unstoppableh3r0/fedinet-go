@@ -236,22 +236,32 @@ func VerifyMessageSignature(payload, signatureHex, publicKeyHex string) bool {
 	return ed25519.Verify(publicKey, []byte(payload), signatureBytes)
 }
 
-// IsFederatedUser checks if a user ID represents a federated user
+// IsFederatedUser checks if a user ID represents a user on a different federated server.
+// Uses case-insensitive comparison to handle external-format IDs correctly.
 func IsFederatedUser(userID string) (bool, string) {
-	parts := strings.Split(userID, "@")
+	parts := strings.Split(strings.ToLower(userID), "@")
 	if len(parts) != 2 {
 		return false, ""
 	}
 
-	serverName := parts[1]
-	currentServerName := getCurrentServerName()
+	serverSuffix := parts[1]
+	localServerName := strings.ToLower(getCurrentServerName())
 
-	// Check if it's a different server
-	if serverName != currentServerName {
-		return true, serverName
+	// Same server (internal format) — local user
+	if serverSuffix == localServerName {
+		return false, ""
 	}
 
-	return false, ""
+	// Check the public-facing server name from DB config if available
+	// (handles edge case where frontend sends user@PublicName vs user@server_a)
+	config, configErr := GetServerConfig()
+	if configErr == nil && config.ServerName != "" {
+		if serverSuffix == strings.ToLower(config.ServerName) {
+			return false, ""
+		}
+	}
+
+	return true, serverSuffix
 }
 
 // getCurrentServerName gets the current server's name from SERVER_ID env

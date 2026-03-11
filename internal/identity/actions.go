@@ -38,8 +38,9 @@ func FollowUser(followerID, followeeID string) error {
 	// Invalidate cache immediately so the updated lists are visible right away.
 	invalidateFollowCaches(followerID, followeeID)
 
-	if err := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); err != nil {
-		return err
+	// Non-fatal: log activity and create notification — don't block follow on these
+	if logErr := LogActivity(followerID, "FOLLOW", "user", followeeID, "", ""); logErr != nil {
+		log.Printf("Warning: failed to log follow activity: %v", logErr)
 	}
 
 	// Propagate the follow relationship to the remote server's DB so their
@@ -48,7 +49,10 @@ func FollowUser(followerID, followeeID string) error {
 		go DeliverFederatedFollow(followerID, followeeID, "follow")
 	}
 
-	return CreateNotification(followeeID, followerID, "FOLLOW", followeeID)
+	if notifErr := CreateNotification(followeeID, followerID, "FOLLOW", followeeID); notifErr != nil {
+		log.Printf("Warning: failed to create follow notification: %v", notifErr)
+	}
+	return nil
 }
 
 func UnfollowUser(followerID, followeeID string) error {
@@ -105,21 +109,21 @@ func SendMessage(senderID, recipientID, content string, imageURL *string) error 
 	return nil
 }
 
-func UpdateBio(identityID, newBio string) error {
+func UpdateBio(userID, newBio string) error {
 	_, err := db.Exec(
 		`UPDATE profiles SET bio=$1, updated_at=NOW()
-		 WHERE identity_id=$2`,
-		newBio, identityID,
+		 WHERE user_id=$2`,
+		newBio, userID,
 	)
 	if err != nil {
 		return err
 	}
 
 	return LogActivity(
-		identityID,
+		userID,
 		"UPDATE",
 		"profile",
-		identityID,
+		userID,
 		"",
 		`{"action": "bio updated"}`,
 	)
@@ -129,13 +133,18 @@ func LogActivity(actorID, verb, objectType, objectID, targetID, payload string) 
 	if payload == "" {
 		payload = "{}"
 	}
+	// Insert into outbox_activities (the real table). 'activities' does not exist.
 	_, err := db.Exec(
-		`INSERT INTO activities
-		(actor_id, verb, object_type, object_id, target_id, payload)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		actorID, verb, objectType, objectID, targetID, payload,
+		`INSERT INTO outbox_activities
+		(activity_type, actor_id, target_server, target_id, payload, delivery_status, attempt_count)
+		VALUES ($1, $2, $3, $4, $5::jsonb, 'sent', 0)`,
+		verb, actorID, objectType, objectID, payload,
 	)
-	return err
+	if err != nil {
+		// Non-fatal: log the error but don't block the primary action
+		log.Printf("LogActivity warning (non-fatal): %v", err)
+	}
+	return nil
 }
 
 func GetProfileByUserID(userID string) (*models.Profile, error) {
@@ -379,17 +388,17 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 	return nil
 }
 
-func CreatePost(userID, content string, imageURL *string) (string, error) {
+func CreatePost(userID, content string, imageURL *string, visibility string) (string, error) {
 	// Allow image-only posts by using a space sentinel when content is empty
 	if content == "" {
 		content = " "
 	}
 	var postID string
 	err := db.QueryRow(`
-		INSERT INTO posts (author, content, image_url, created_at, updated_at)
-		VALUES ($1, $2, $3, NOW(), NOW())
+		INSERT INTO posts (author, content, image_url, visibility, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
 		RETURNING id
-	`, userID, content, imageURL).Scan(&postID)
+	`, userID, content, imageURL, visibility).Scan(&postID)
 
 	if err != nil {
 		return "", err
@@ -564,7 +573,7 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) as has_reposted,
 			p.image_url
 		FROM posts p
-		WHERE p.author = $1
+		WHERE p.author = $1 AND UPPER(p.visibility) = 'PUBLIC'
 		ORDER BY p.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
@@ -611,6 +620,7 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 			EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $1) as has_reposted,
 			p.image_url
 		FROM posts p
+		WHERE UPPER(p.visibility) = 'PUBLIC'
 		ORDER BY p.created_at DESC
 		LIMIT $2
 	`

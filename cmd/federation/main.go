@@ -27,6 +27,7 @@ func main() {
 
 	// Initialize database
 	federation.InitDB()
+	federation.ApplyMigrations()
 
 	mux := http.NewServeMux()
 

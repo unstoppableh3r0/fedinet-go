@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ── Badge helpers ──────────────────────────────────────────────────────────────
@@ -78,6 +80,16 @@ func AssignBadgeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Identify the admin performing the action.
+	authHeader := r.Header.Get("Authorization")
+	authParts := strings.Split(authHeader, " ")
+	adminActorID := "system"
+	if len(authParts) == 2 && authParts[0] == "Bearer" {
+		if adminClaims, err := ValidateUserToken(authParts[1]); err == nil {
+			adminActorID = ToInternalID(adminClaims.UserID)
+		}
+	}
+
 	var req struct {
 		UserID string `json:"user_id"`
 		Badge  string `json:"badge"`
@@ -113,9 +125,11 @@ func AssignBadgeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Notify the user about their new badge
+	// Notify the user about their new badge — actor is the admin who granted it.
 	notifMsg := "Your account badge has been updated to: " + req.Badge
-	_ = CreateNotification(internalUserID, "system", "BADGE_GRANTED", notifMsg)
+	_ = CreateNotification(internalUserID, adminActorID, "BADGE_GRANTED", notifMsg)
+
+	go LogAdminAction(ToExternalID(adminActorID), "BADGE_ASSIGNED", ToExternalID(internalUserID), "badge="+req.Badge)
 
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"message": "badge assigned",
@@ -269,4 +283,169 @@ func UpdatePermissionsHandler(w http.ResponseWriter, r *http.Request) {
 		result[k] = GetPermission(k)
 	}
 	RespondWithJSON(w, http.StatusOK, result)
+}
+
+// ── Admin activity logging ─────────────────────────────────────────────────────
+
+// LogAdminAction inserts a record into the admin_logs table.
+// Called fire-and-forget (errors are only logged, not propagated).
+func LogAdminAction(actor, action, targetID, detail string) {
+	_, err := db.Exec(
+		`INSERT INTO admin_logs (actor, action, target_id, detail) VALUES ($1, $2, $3, $4)`,
+		actor, action, targetID, detail,
+	)
+	if err != nil {
+		log.Printf("LogAdminAction: %v", err)
+	}
+}
+
+// ── Badge revoke ───────────────────────────────────────────────────────────────
+
+// POST /admin/users/revoke-badge
+// Body: { "user_id": "alice@server_a" }
+// Resets the user's badge back to the default "user" value.
+func RevokeBadgeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	authParts := strings.Split(authHeader, " ")
+	adminActorID := "admin"
+	if len(authParts) == 2 && authParts[0] == "Bearer" {
+		if claims, err := ValidateUserToken(authParts[1]); err == nil {
+			adminActorID = ToInternalID(claims.UserID)
+		}
+	}
+
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.UserID == "" {
+		RespondWithError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+
+	internalUserID := ToInternalID(req.UserID)
+
+	var existing string
+	err := db.QueryRow(`SELECT user_id FROM identities WHERE user_id = $1`, internalUserID).Scan(&existing)
+	if err == sql.ErrNoRows {
+		RespondWithError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		RespondWithError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
+	if err := SetUserBadge(internalUserID, "user"); err != nil {
+		log.Printf("RevokeBadgeHandler: SetUserBadge: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to revoke badge")
+		return
+	}
+
+	notifMsg := "Your account badge has been revoked."
+	_ = CreateNotification(internalUserID, adminActorID, "BADGE_GRANTED", notifMsg)
+
+	go LogAdminAction(ToExternalID(adminActorID), "BADGE_REVOKED", ToExternalID(internalUserID), "badge revoked → user")
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{
+		"message": "badge revoked",
+		"user_id": ToExternalID(internalUserID),
+	})
+}
+
+// ── Admin logs endpoint ────────────────────────────────────────────────────────
+
+// AdminLogEntry is the JSON shape returned to the frontend.
+type AdminLogEntry struct {
+	ID        string    `json:"id"`
+	Actor     string    `json:"actor"`
+	Action    string    `json:"action"`
+	TargetID  string    `json:"target_id"`
+	Detail    string    `json:"detail"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// GET /admin/logs
+// Query params: limit (default 50, max 200), offset, actor (optional filter).
+func GetAdminLogsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	q := r.URL.Query()
+
+	limit := 50
+	if l := q.Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			if n > 200 {
+				n = 200
+			}
+			limit = n
+		}
+	}
+
+	offset := 0
+	if o := q.Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	actor := q.Get("actor")
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if actor != "" {
+		rows, err = db.Query(
+			`SELECT id, actor, action, target_id, detail, created_at
+			 FROM admin_logs WHERE actor ILIKE $1
+			 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+			"%"+actor+"%", limit, offset,
+		)
+	} else {
+		rows, err = db.Query(
+			`SELECT id, actor, action, target_id, detail, created_at
+			 FROM admin_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+			limit, offset,
+		)
+	}
+	if err != nil {
+		log.Printf("GetAdminLogsHandler: query: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer rows.Close()
+
+	entries := []AdminLogEntry{}
+	for rows.Next() {
+		var e AdminLogEntry
+		if err := rows.Scan(&e.ID, &e.Actor, &e.Action, &e.TargetID, &e.Detail, &e.CreatedAt); err != nil {
+			log.Printf("GetAdminLogsHandler: scan: %v", err)
+			continue
+		}
+		entries = append(entries, e)
+	}
+
+	var total int
+	if actor != "" {
+		db.QueryRow(`SELECT COUNT(*) FROM admin_logs WHERE actor ILIKE $1`, "%"+actor+"%").Scan(&total)
+	} else {
+		db.QueryRow(`SELECT COUNT(*) FROM admin_logs`).Scan(&total)
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"logs":  entries,
+		"count": total,
+	})
 }

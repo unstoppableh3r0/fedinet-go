@@ -339,6 +339,9 @@ func ApplyMigrations() {
 		// User badge column: 'user' | 'moderator' | 'admin'
 		`ALTER TABLE identities ADD COLUMN IF NOT EXISTS badge TEXT NOT NULL DEFAULT 'user'`,
 
+		// Resharing control column missing from initial privacy_settings table
+		`ALTER TABLE privacy_settings ADD COLUMN IF NOT EXISTS disable_resharing BOOLEAN NOT NULL DEFAULT false`,
+
 		// Moderation feature toggle stored in server_config
 		`INSERT INTO server_config (key, value, updated_by, updated_at)
 		 VALUES ('moderation_enabled', 'true', 'system', NOW())
@@ -397,6 +400,18 @@ func ApplyMigrations() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_privacy_audit_logs_actor ON privacy_audit_logs(actor_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_privacy_audit_logs_time  ON privacy_audit_logs(created_at DESC)`,
+
+		// Admin activity audit log
+		`CREATE TABLE IF NOT EXISTS admin_logs (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			actor      TEXT        NOT NULL DEFAULT 'admin',
+			action     TEXT        NOT NULL,
+			target_id  TEXT        NOT NULL DEFAULT '',
+			detail     TEXT        NOT NULL DEFAULT '',
+			created_at TIMESTAMP   NOT NULL DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_logs_actor ON admin_logs(actor, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_logs_time  ON admin_logs(created_at DESC)`,
 
 		// DM at-rest encryption flag and group encryption policy
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_encrypted BOOLEAN NOT NULL DEFAULT false`,
@@ -462,6 +477,10 @@ func ApplyMigrations() {
 
 		// Track activities count in admin dashboard trend chart
 		`ALTER TABLE server_stats_snapshots ADD COLUMN IF NOT EXISTS total_activities INT NOT NULL DEFAULT 0`,
+
+		// Allow likes on federated (remote-server) posts whose post_id does not
+		// exist in the local posts table.  The FK was preventing cross-server likes.
+		`ALTER TABLE likes DROP CONSTRAINT IF EXISTS likes_post_id_fkey`,
 	}
 
 	for _, schema := range schemas {

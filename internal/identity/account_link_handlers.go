@@ -37,12 +37,32 @@ type accountLinkJSON struct {
 	TargetName      string `json:"target_name,omitempty"`
 	TargetAvatar    string `json:"target_avatar,omitempty"`
 	CreatedAt       string `json:"created_at"`
+	// PeerServer is the external (browser-accessible) home_server URL for the
+	// peer account.  The frontend uses this to correctly route API calls after
+	// an account switch.
+	PeerServer string `json:"peer_server_url,omitempty"`
 }
 
 // getPeerURL resolves a federated server's identity endpoint URL from the
 // FEDERATION_PEERS env var (format: "server_b=http://host:port,server_c=http://...")
 func getPeerURL(serverID string) string {
 	peers := os.Getenv("FEDERATION_PEERS")
+	if peers == "" {
+		return ""
+	}
+	for _, pair := range strings.Split(peers, ",") {
+		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(kv) == 2 && strings.TrimSpace(kv[0]) == serverID {
+			return strings.TrimSpace(kv[1])
+		}
+	}
+	return ""
+}
+
+// getPeerExternalURL resolves a peer server's browser-accessible (external) URL.
+// Reads FEDERATION_PEERS_EXTERNAL env var (same format as FEDERATION_PEERS).
+func getPeerExternalURL(serverID string) string {
+	peers := os.Getenv("FEDERATION_PEERS_EXTERNAL")
 	if peers == "" {
 		return ""
 	}
@@ -146,6 +166,29 @@ func GetAccountLinksUserHandler(w http.ResponseWriter, r *http.Request) {
 		isInbound := row.RequesterID != internalUserID
 		canRemove := row.Status == "confirmed" || row.RequesterID == internalUserID
 
+		// Compute the peer's external (browser-facing) home_server URL.
+		peerIDInternal := row.TargetID
+		if isInbound {
+			peerIDInternal = row.RequesterID
+		}
+		peerServerID := ""
+		if parts := strings.SplitN(peerIDInternal, "@", 2); len(parts) == 2 {
+			peerServerID = parts[1]
+		}
+		myServerID := os.Getenv("SERVER_ID")
+		if myServerID == "" {
+			myServerID = "localhost"
+		}
+		peerServerURL := ""
+		if peerServerID == "" || peerServerID == myServerID {
+			peerServerURL = os.Getenv("SERVER_URL")
+			if peerServerURL == "" {
+				peerServerURL = "http://localhost:8080"
+			}
+		} else {
+			peerServerURL = getPeerExternalURL(peerServerID)
+		}
+
 		links = append(links, accountLinkJSON{
 			ID:              row.ID,
 			RequesterID:     ToExternalID(row.RequesterID),
@@ -158,6 +201,7 @@ func GetAccountLinksUserHandler(w http.ResponseWriter, r *http.Request) {
 			TargetName:      row.TargetName,
 			TargetAvatar:    row.TargetAvat,
 			CreatedAt:       row.CreatedAt.Format(time.RFC3339),
+			PeerServer:      peerServerURL,
 		})
 	}
 
@@ -425,7 +469,27 @@ func SwitchAccountLinkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use the server's public URL (same logic as LoginHandler)
+	// Determine if this is a cross-server switch.
+	// toUserID is in internal format: "username@server_id"
+	targetServerID := ""
+	if parts := strings.SplitN(toUserID, "@", 2); len(parts) == 2 {
+		targetServerID = parts[1]
+	}
+	myServerID := os.Getenv("SERVER_ID")
+	if myServerID == "" {
+		myServerID = "localhost"
+	}
+
+	if targetServerID != "" && targetServerID != myServerID {
+		// Cross-server switch: this server cannot issue tokens valid on the
+		// target server.  Tell the frontend to fall back to password login on
+		// the target server (which it will fetch from peer_server_url in the
+		// linked-accounts list).
+		RespondWithError(w, http.StatusUnprocessableEntity, "cross-server switch: please log in with your password on the target server")
+		return
+	}
+
+	// Same-server switch — issue tokens as normal.
 	externalURL := os.Getenv("SERVER_URL")
 	if externalURL == "" {
 		externalURL = "http://localhost:8080"

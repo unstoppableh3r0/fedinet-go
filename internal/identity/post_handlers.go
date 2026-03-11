@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -167,16 +168,16 @@ func CreatePostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID         string   `json:"user_id"`
-		Content        string   `json:"content"`
-		ImageURL       *string  `json:"image_url"`
-		ExpiresIn      *string  `json:"expires_in"` // e.g. "1h", "6h", "24h", "3d", "7d" or RFC3339 timestamp
-		Visibility     string   `json:"visibility"` // "PUBLIC" | "FOLLOWERS" | "CLOSE_FRIENDS" (default: "PUBLIC")
-		ContentWarning *string  `json:"content_warning"`
+		UserID         string  `json:"user_id"`
+		Content        string  `json:"content"`
+		ImageURL       *string `json:"image_url"`
+		ExpiresIn      *string `json:"expires_in"` // e.g. "1h", "6h", "24h", "3d", "7d" or RFC3339 timestamp
+		Visibility     string  `json:"visibility"` // "PUBLIC" | "FOLLOWERS" | "CLOSE_FRIENDS" (default: "PUBLIC")
+		ContentWarning *string `json:"content_warning"`
 		// LinkedTargets is a list of server base URLs to replicate this post to,
 		// e.g. ["http://serverB:8080", "http://serverC:8080"].
 		// Only used when the post author has confirmed account links on those servers.
-		LinkedTargets  []string `json:"linked_targets,omitempty"`
+		LinkedTargets []string `json:"linked_targets,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -735,6 +736,99 @@ func GetUserRepostedPostsHandler(w http.ResponseWriter, r *http.Request) {
 	RespondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"posts": posts,
 	})
+}
+
+// DeletePostHandler handles POST /post/delete
+// Body: { "user_id": "...", "post_id": "..." }
+// The caller must own the post; the request must carry a valid Authorization JWT.
+func DeletePostHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		UserID string `json:"user_id"`
+		PostID string `json:"post_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.UserID == "" || req.PostID == "" {
+		RespondWithError(w, http.StatusBadRequest, "missing user_id or post_id")
+		return
+	}
+
+	// Verify the JWT belongs to the claimed user.
+	authHeader := r.Header.Get("Authorization")
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		RespondWithError(w, http.StatusUnauthorized, "authorization required")
+		return
+	}
+	claims, err := ValidateUserToken(parts[1])
+	if err != nil || claims.UserID != req.UserID {
+		RespondWithError(w, http.StatusForbidden, "not authorized")
+		return
+	}
+
+	internalUserID := ToInternalID(req.UserID)
+
+	if err := DeletePost(req.PostID, internalUserID); err != nil {
+		log.Printf("DeletePost error user=%s post=%s: %v", internalUserID, req.PostID, err)
+		RespondWithError(w, http.StatusForbidden, "post not found or you are not the author")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "post deleted"})
+}
+
+// EditPostHandler handles POST /post/edit
+// Body: { "user_id": "...", "post_id": "...", "content": "..." }
+// Only the post author may edit; requires a valid Authorization JWT.
+func EditPostHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		RespondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		UserID  string `json:"user_id"`
+		PostID  string `json:"post_id"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.UserID == "" || req.PostID == "" || req.Content == "" {
+		RespondWithError(w, http.StatusBadRequest, "missing user_id, post_id, or content")
+		return
+	}
+
+	// Verify the JWT belongs to the claimed user.
+	authHeader2 := r.Header.Get("Authorization")
+	parts2 := strings.Split(authHeader2, " ")
+	if len(parts2) != 2 || parts2[0] != "Bearer" {
+		RespondWithError(w, http.StatusUnauthorized, "authorization required")
+		return
+	}
+	claims, err := ValidateUserToken(parts2[1])
+	if err != nil || claims.UserID != req.UserID {
+		RespondWithError(w, http.StatusForbidden, "not authorized")
+		return
+	}
+
+	internalUserID := ToInternalID(req.UserID)
+
+	if err := EditPost(req.PostID, internalUserID, req.Content); err != nil {
+		log.Printf("EditPost error user=%s post=%s: %v", internalUserID, req.PostID, err)
+		RespondWithError(w, http.StatusForbidden, "post not found or you are not the author")
+		return
+	}
+
+	RespondWithJSON(w, http.StatusOK, map[string]string{"message": "post updated"})
 }
 
 // parseExpiryShorthand converts "1h", "6h", "12h", "24h", "3d", "7d" into a time.Duration.

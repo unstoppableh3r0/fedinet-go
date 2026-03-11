@@ -108,10 +108,24 @@ func RecoverAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	externalURL := os.Getenv("SERVER_URL")
+	if externalURL == "" {
+		externalURL = "http://localhost:8080"
+	}
+
+	accessToken, refreshToken, err := GenerateTokenPair(identity.UserID, externalURL)
+	if err != nil {
+		log.Println("Token generation failed after recovery:", err)
+		RespondWithError(w, http.StatusInternalServerError, "failed to generate tokens")
+		return
+	}
+
 	RespondWithJSON(w, http.StatusOK, map[string]string{
 		"message":          "account recovered successfully",
-		"new_private_key":  newPrivKey,
 		"new_recovery_key": newRecoveryKey,
-		"user_id":          identity.UserID,
+		"user_id":          ToExternalID(identity.UserID),
+		"home_server":      externalURL,
+		"access_token":     accessToken,
+		"refresh_token":    refreshToken,
 	})
 }

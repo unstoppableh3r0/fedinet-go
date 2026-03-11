@@ -38,7 +38,8 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 			p.expires_at,
 			p.group_id,
 			p.origin_post,
-			p.origin_server
+			p.origin_server,
+			p.visibility
 		FROM (
 			SELECT DISTINCT ON (COALESCE(p2.group_id, p2.id::text))
 				p2.*
@@ -47,7 +48,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 				p2.author IN (SELECT followee_user_id FROM follows WHERE follower_user_id = $1)
 				OR p2.author = $1
 			  )
-			  AND p2.visibility != 'HIDDEN'
+			  AND p2.visibility NOT IN ('HIDDEN', 'REJECTED')
 			  AND (p2.expires_at IS NULL OR p2.expires_at > NOW())
 			  AND (
 			    p2.author = $1
@@ -71,7 +72,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 		LEFT JOIN replies r  ON p.id = r.post_id
 		LEFT JOIN reposts rp ON p.id = rp.post_id
 		GROUP BY p.id, p.author, p.content, p.created_at, p.updated_at,
-		         p.image_url, p.expires_at, p.group_id, p.origin_post, p.origin_server
+		         p.image_url, p.expires_at, p.group_id, p.origin_post, p.origin_server, p.visibility
 		ORDER BY p.created_at DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -90,7 +91,7 @@ func GetFeedPosts(userID string, limit, offset int) ([]models.Post, error) {
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
 			&p.HasLiked, &p.HasReposted, &p.ImageURL, &p.ExpiresAt,
-			&p.GroupID, &p.OriginPost, &p.OriginServer,
+			&p.GroupID, &p.OriginPost, &p.OriginServer, &p.Visibility,
 		)
 		if err != nil {
 			log.Printf("Error scanning post: %v", err)

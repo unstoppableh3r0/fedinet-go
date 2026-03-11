@@ -386,6 +386,13 @@ func GetPublicUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return public profile
+	// Enforce search_federated privacy setting
+	privacy := getPrivacySettingsForUser(userID)
+	if privacy.SearchFederated == "hidden" {
+		RespondWithJSON(w, http.StatusForbidden, map[string]string{"error": "profile unavailable"})
+		return
+	}
+
 	RespondWithJSON(w, http.StatusOK, FederatedUserProfile{
 		UserID:      userID,
 		Username:    username,

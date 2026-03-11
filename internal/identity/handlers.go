@@ -156,6 +156,13 @@ func UserSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce search_local privacy setting
+	ps := getPrivacySettingsForUser(internalUserID)
+	if ps.SearchLocal == "hidden" {
+		RespondWithError(w, http.StatusForbidden, "profile unavailable")
+		return
+	}
+
 	profile, err := GetProfileByUserID(internalUserID)
 	if err != nil {
 		log.Printf("GetProfileByUserID error for user %s: %v", internalUserID, err)
@@ -223,6 +230,12 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	// 🔥 Invite check FIRST (for integration test requirement)
 	if req.InviteCode == "" {
 		RespondWithError(w, http.StatusForbidden, "invite code required")
+		return
+	}
+
+	// Validate the invite code before touching any user data.
+	if _, err := ValidateInvite(req.InviteCode); err != nil {
+		RespondWithError(w, http.StatusForbidden, "invalid or expired invite code")
 		return
 	}
 

@@ -335,7 +335,9 @@ func GetServerStats() (*ServerStats, error) {
 func GetAllUsers() ([]models.UserDocument, error) {
 	rows, err := db.Query(`
 		SELECT 
-			i.id, i.user_id, i.home_server, i.public_key, i.allow_discovery, i.created_at, i.updated_at,
+			i.id, i.user_id, i.home_server, i.public_key, i.allow_discovery,
+			COALESCE(i.badge, 'user') AS badge,
+			i.created_at, i.updated_at,
 			p.user_id, p.display_name, p.avatar_url, p.banner_url, p.bio, p.portfolio_url, 
 			p.birth_date, p.location, p.followers_visibility, p.following_visibility, 
 			p.created_at, p.updated_at
@@ -355,6 +357,7 @@ func GetAllUsers() ([]models.UserDocument, error) {
 		err := rows.Scan(
 			&doc.Identity.ID, &doc.Identity.UserID, &doc.Identity.HomeServer,
 			&doc.Identity.PublicKey, &doc.Identity.AllowDiscovery,
+			&doc.Identity.Badge,
 			&doc.Identity.CreatedAt, &doc.Identity.UpdatedAt,
 			&doc.Profile.UserID, &doc.Profile.DisplayName,
 			&doc.Profile.AvatarURL, &doc.Profile.BannerURL, &doc.Profile.Bio,

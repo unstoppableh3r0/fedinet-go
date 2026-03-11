@@ -1,6 +1,6 @@
 module github.com/unstoppableh3r0/fedinet-go
 
-go 1.25.6
+go 1.25.0
 
 require (
 	github.com/google/uuid v1.6.0

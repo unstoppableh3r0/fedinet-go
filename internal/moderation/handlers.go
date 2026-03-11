@@ -245,7 +245,8 @@ func (h *Handler) ApproveContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ContentID string `json:"content_id"`
+		ContentID   string `json:"content_id"`
+		ModeratorID string `json:"moderator_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -253,7 +254,7 @@ func (h *Handler) ApproveContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.service.UpdateReviewStatus(req.ContentID, "APPROVED")
+	err := h.service.UpdateReviewStatus(req.ContentID, "APPROVED", req.ModeratorID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -271,7 +272,8 @@ func (h *Handler) RejectContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ContentID string `json:"content_id"`
+		ContentID   string `json:"content_id"`
+		ModeratorID string `json:"moderator_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -279,7 +281,7 @@ func (h *Handler) RejectContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.service.UpdateReviewStatus(req.ContentID, "REJECTED")
+	err := h.service.UpdateReviewStatus(req.ContentID, "REJECTED", req.ModeratorID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

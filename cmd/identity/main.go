@@ -77,7 +77,6 @@ func main() {
 	rlRead := identity.RateLimitMiddleware(readLimiter)
 	rlFed := identity.RateLimitMiddleware(fedLimiter)
 
-
 	mux := http.NewServeMux()
 
 	// Server initialization & status
@@ -143,7 +142,9 @@ func main() {
 	mux.Handle("/post/like", rlWrite(http.HandlerFunc(identity.ToggleLikeHandler)))
 	mux.Handle("/post/repost", rlWrite(http.HandlerFunc(identity.ToggleRepostHandler)))
 	mux.Handle("/post/reply", rlWrite(http.HandlerFunc(identity.CreateReplyHandler))) // frontend alias
-	mux.HandleFunc("/post/replies", identity.GetPostRepliesHandler)                   // frontend alias
+	mux.Handle("/post/delete", rlWrite(http.HandlerFunc(identity.DeletePostHandler)))
+	mux.Handle("/post/edit", rlWrite(http.HandlerFunc(identity.EditPostHandler)))
+	mux.HandleFunc("/post/replies", identity.GetPostRepliesHandler) // frontend alias
 	mux.Handle("/reply", rlWrite(http.HandlerFunc(identity.CreateReplyHandler)))
 	mux.HandleFunc("/replies", identity.GetPostRepliesHandler)
 	mux.HandleFunc("/posts/recent", identity.GetRecentPostsHandler)
@@ -310,6 +311,10 @@ func main() {
 
 	// ── Badge management (admin-only) ─────────────────────────────────────────
 	mux.Handle("/admin/users/assign-badge", identity.AdminAuthMiddleware(http.HandlerFunc(identity.AssignBadgeHandler)))
+	mux.Handle("/admin/users/revoke-badge", identity.AdminAuthMiddleware(http.HandlerFunc(identity.RevokeBadgeHandler)))
+
+	// ── Admin activity logs (admin-only) ──────────────────────────────────────
+	mux.Handle("/admin/logs", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetAdminLogsHandler)))
 
 	// ── Moderation feature toggle (admin-only) ────────────────────────────────
 	mux.Handle("/admin/moderation/status", identity.AdminAuthMiddleware(http.HandlerFunc(identity.GetModerationStatusHandler)))
@@ -340,6 +345,36 @@ func main() {
 
 	// Moderator pending posts list (queries posts table directly by visibility)
 	mux.Handle("/moderation/pending", identity.ModeratorAuthMiddleware(http.HandlerFunc(identity.GetPendingPostsHandler)))
+
+	// Report listing and resolving (moderator-protected)
+	mux.Handle("/moderation/reports", identity.ModeratorAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.ListPendingReports(w, r)
+	})))
+	mux.Handle("/moderation/resolve", identity.ModeratorAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.ResolveReport(w, r)
+	})))
+
+	// Report submission (authenticated users)
+	mux.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.SubmitReport(w, r)
+	})
+
+	// Server blocking (admin-only)
+	mux.Handle("/servers/block", identity.AdminAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		repo := moderation.NewRepository(database)
+		service := moderation.NewService(repo)
+		handler := moderation.NewHandler(service)
+		handler.BlockServer(w, r)
+	})))
 
 	// Image uploads
 	mux.HandleFunc("/upload/image", identity.UploadImageHandler)

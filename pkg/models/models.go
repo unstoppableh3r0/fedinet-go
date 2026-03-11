@@ -22,6 +22,7 @@ type Identity struct {
 	HomeServer     string    `json:"home_server"`
 	PublicKey      string    `json:"public_key"`
 	AllowDiscovery bool      `json:"allow_discovery"`
+	Badge          string    `json:"badge,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 
@@ -203,16 +204,16 @@ type Post struct {
 	ResharingDisabled bool   `json:"resharing_disabled,omitempty"`
 	Visibility        string `json:"visibility,omitempty"`
 
-	IsEdited   bool       `json:"is_edited"`
-	VersionNum int        `json:"version_num"`
+	IsEdited       bool       `json:"is_edited"`
+	VersionNum     int        `json:"version_num"`
 	ImageURL       *string    `json:"image_url,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	ContentWarning *string    `json:"content_warning,omitempty"`
 
 	// Multi-server posting: group identity for replica posts
-	GroupID      *string  `json:"group_id,omitempty"`
-	OriginPost   *string  `json:"origin_post,omitempty"`
-	OriginServer *string  `json:"origin_server,omitempty"`
+	GroupID      *string `json:"group_id,omitempty"`
+	OriginPost   *string `json:"origin_post,omitempty"`
+	OriginServer *string `json:"origin_server,omitempty"`
 	// ReplicaServers is populated by the feed query to show where else a post lives
 	ReplicaServers []string `json:"replica_servers,omitempty"`
 }

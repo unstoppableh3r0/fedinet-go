@@ -2,6 +2,7 @@ package identity
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -606,7 +607,7 @@ func GetUserPosts(targetUserID, viewerUserID string, limit, offset int) ([]model
 		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE p.author = $1
 		  AND (p.expires_at IS NULL OR p.expires_at > NOW())
-		  AND p.visibility != 'HIDDEN'
+		  AND p.visibility NOT IN ('HIDDEN', 'REJECTED')
 		  AND (
 		    p.author = $2
 		    OR p.visibility = 'PUBLIC'
@@ -675,7 +676,7 @@ func GetRecentPosts(viewerUserID string, limit int) ([]models.Post, error) {
 		FROM posts p
 		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE (p.expires_at IS NULL OR p.expires_at > NOW())
-		  AND p.visibility != 'HIDDEN'
+		  AND p.visibility NOT IN ('HIDDEN', 'REJECTED')
 		  AND (
 		    p.author = $1
 		    OR p.visibility = 'PUBLIC'
@@ -768,6 +769,7 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 		       (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) AS repost_count,
 		       EXISTS(SELECT 1 FROM likes  WHERE post_id = p.id AND user_id = $2) AS has_liked,
 		       EXISTS(SELECT 1 FROM reposts WHERE post_id = p.id AND user_id = $2) AS has_reposted,
+		       p.image_url,
 		       COALESCE(ps.disable_resharing, false) AS resharing_disabled,
 		       p.visibility,
 		       p.content_warning
@@ -775,7 +777,7 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 		INNER JOIN likes l ON l.post_id = p.id
 		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE l.user_id = $1
-		  AND p.visibility != 'HIDDEN'
+		  AND p.visibility NOT IN ('HIDDEN', 'REJECTED')
 		  AND (
 		    p.author = $2
 		    OR p.visibility = 'PUBLIC'
@@ -801,6 +803,7 @@ func GetUserLikedPosts(userID, viewerUserID string, limit, offset int) ([]models
 			&p.ID, &p.Author, &p.Content, &p.CreatedAt, &p.UpdatedAt,
 			&p.LikeCount, &p.ReplyCount, &p.RepostCount,
 			&p.HasLiked, &p.HasReposted,
+			&p.ImageURL,
 			&p.ResharingDisabled, &p.Visibility, &p.ContentWarning,
 		); err != nil {
 			return nil, err
@@ -827,7 +830,7 @@ func GetUserRepostedPosts(userID, viewerUserID string, limit, offset int) ([]mod
 		INNER JOIN reposts rp ON rp.post_id = p.id
 		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE rp.user_id = $1
-		  AND p.visibility != 'HIDDEN'
+		  AND p.visibility NOT IN ('HIDDEN', 'REJECTED')
 		  AND (
 		    p.author = $2
 		    OR p.visibility = 'PUBLIC'
@@ -877,7 +880,7 @@ func GetPostByID(postID, viewerUserID string) (*models.Post, error) {
 		FROM posts p
 		LEFT JOIN privacy_settings ps ON ps.user_id = p.author
 		WHERE p.id = $1
-		  AND p.visibility != 'HIDDEN'
+		  AND p.visibility NOT IN ('HIDDEN', 'REJECTED')
 		  AND (
 		    p.author = $2
 		    OR p.visibility = 'PUBLIC'
@@ -899,6 +902,35 @@ func GetPostByID(postID, viewerUserID string) (*models.Post, error) {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// DeletePost removes the post from the DB. Only the post's author may delete it.
+func DeletePost(postID, requesterID string) error {
+	result, err := db.Exec(`DELETE FROM posts WHERE id = $1 AND author = $2`, postID, requesterID)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return errors.New("post not found or not authorized")
+	}
+	return nil
+}
+
+// EditPost updates the text content of a post. Only the author may edit.
+func EditPost(postID, requesterID, newContent string) error {
+	result, err := db.Exec(
+		`UPDATE posts SET content = $1, updated_at = NOW() WHERE id = $2 AND author = $3`,
+		newContent, postID, requesterID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return errors.New("post not found or not authorized")
+	}
+	return nil
 }
 
 func CreateNotification(recipientID, actorID, typeStr, entityID string) error {

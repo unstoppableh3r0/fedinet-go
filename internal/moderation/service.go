@@ -72,11 +72,17 @@ func (s *Service) GetModerationQueue() ([]map[string]interface{}, error) {
 	return s.repo.GetModerationQueue()
 }
 
-func (s *Service) UpdateReviewStatus(contentID string, status string) error {
+func (s *Service) UpdateReviewStatus(contentID string, status string, moderatorID string) error {
 	// Update moderation_results row if it exists (may be empty for AI-flagged posts)
 	if err := s.repo.UpdateReviewStatus(contentID, status); err != nil {
 		// Row may not exist yet for AI-flagged posts; log but continue
 		log.Printf("moderation: UpdateReviewStatus %q: %v", contentID, err)
+	}
+
+	// Fall back to "system" when no moderator identity is known.
+	actor := moderatorID
+	if actor == "" {
+		actor = "system"
 	}
 
 	// Look up the content author so we can notify them of the decision
@@ -90,7 +96,7 @@ func (s *Service) UpdateReviewStatus(contentID string, status string) error {
 		// Notify author
 		if authorErr == nil && authorID != "" {
 			notifMsg := "Your " + contentType + " has been reviewed and approved. It is now visible."
-			_ = s.repo.CreateUserNotification(authorID, "system", "POST_APPROVED", notifMsg)
+			_ = s.repo.CreateUserNotification(authorID, actor, "POST_APPROVED", notifMsg)
 		}
 	case "REJECTED":
 		if err := s.repo.UpdatePostVisibility(contentID, "REJECTED"); err != nil {
@@ -99,7 +105,7 @@ func (s *Service) UpdateReviewStatus(contentID string, status string) error {
 		// Notify author
 		if authorErr == nil && authorID != "" {
 			notifMsg := "Your " + contentType + " has been reviewed and rejected by our moderation team."
-			_ = s.repo.CreateUserNotification(authorID, "system", "POST_REJECTED", notifMsg)
+			_ = s.repo.CreateUserNotification(authorID, actor, "POST_REJECTED", notifMsg)
 		}
 	}
 	return nil

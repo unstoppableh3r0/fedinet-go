@@ -59,6 +59,7 @@ services:
       SERVER_URL: http://localhost:8080
       SERVER_ENDPOINT: http://server_a_identity:8082
       FEDERATION_PEERS: "server_b=http://server_b_identity:8082"
+      FEDERATION_PEERS_EXTERNAL: "server_b=http://localhost:9080"
       PORT: "8082"
       AI_MODERATION_API_URL: http://ml-service:8090/moderate
       AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}
@@ -117,6 +118,7 @@ services:
       SERVER_ID: server_b
       SERVER_NAME: Server B
       FEDERATION_PEERS: "server_a=http://server_a_identity:8082"
+      FEDERATION_PEERS_EXTERNAL: "server_a=http://localhost:8080"
       PORT: "8082"
       AI_MODERATION_API_URL: http://ml-service:8090/moderate
       AI_MODERATION_API_KEY: ${AI_MODERATION_API_KEY:-changeme}

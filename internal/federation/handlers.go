@@ -108,9 +108,25 @@ func FetchServerPublicKey(keyID string) (string, error) {
 // SECURITY MIDDLEWARE: SIGNATURE VERIFICATION
 // ============================================================================
 
-// VerifySignatureMiddleware intercepts incoming HTTP requests to ensure they are
-// cryptographically signed by a trusted or resolvable remote server.
-// This prevents "spoofing" where one server pretends to be another.
+/*
+VerifySignatureMiddleware implements the HTTP Signature verification standard.
+This is the primary defense against impersonation in the federated network.
+
+Verification Workflow:
+ 1. Header Extraction: Locate the 'Signature' header and parse its components
+    (keyId, algorithm, headers, signature).
+ 2. Identity Resolution: Use the keyId (actor URL) to fetch the sender's public key.
+    The system checks local DB caches first before attempting an external fetch.
+ 3. Signing String Reconstruction: Rebuild the plaintext signing data by concatenating
+    the required HTTP headers (date, host, digest, etc.) in the exact order specified.
+ 4. Digest Verification: If a 'digest' header is provided, recompute the SHA-256
+    hash of the raw request body and compare it. This ensures data integrity.
+ 5. Cryptographic Check: Use the provided signature, the reconstructed signing string,
+    and the public key to perform the RSA/Ed25519 verification.
+
+Only if every step passes is the request passed to the protected handler.
+Any failure results in a 401 Unauthorized response.
+*/
 func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Mandatory: The 'Signature' header must be present.
@@ -205,8 +221,22 @@ func VerifySignatureMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // INBOUND ACTIVITY PROCESSING (INBOX)
 // ============================================================================
 
-// InboxHandler processes "incoming" federation activities (Follows, Likes, Posts).
-// It includes an AI-based moderation step to filter out toxic content before storage.
+/*
+InboxHandler is the primary receiver for all incoming federated data.
+It acts as a secure buffer between the untrusted internet and the node's internal state.
+
+Operational Steps:
+ 1. Method Enforcement: Rejects anything that isn't a POST request.
+ 2. Structural Integrity Check: Unmarshals the JSON into a models.InboxRequest
+    and validates mandatory fields (ActivityType, Actor, ActorServer).
+ 3. AI-Safety Audit: Content is streamed to the aimoderation service. This
+    identifies toxic content, spam, and policy violations before the database
+    is even touched.
+ 4. Persistence: Hands the validated request to ProcessInboundActivity for
+    storage and background processing.
+ 5. Error Categorization: Returns specific status codes (403 for blocked servers,
+    429 for rate limiters) to provide clear feedback to the sender.
+*/
 func InboxHandler(w http.ResponseWriter, r *http.Request) {
 	// 1. Protocol Validation: Activities are always sent via POST.
 	if r.Method != http.MethodPost {
@@ -276,8 +306,18 @@ func InboxHandler(w http.ResponseWriter, r *http.Request) {
 // OUTBOUND ACTIVITY DISCOVERY (OUTBOX)
 // ============================================================================
 
-// OutboxHandler implements the "Pull" model of federation.
-// It allows remote servers to request a list of public activities for a specific local user.
+/*
+OutboxHandler enables the "Pull" retrieval pattern of federation.
+While most activities are "Pushed" to remote servers via SendActivityHandler,
+some servers may prefer to "Pull" historical data for a specific user.
+
+Capabilities:
+  - Actor Filtering: Only returns activities belonging to the user specified in actor_id.
+  - Privacy Scoping: (Internal Logic) Only returns activities marked as 'public'
+    or 'unlisted'. Direct messages are strictly excluded from the outbox.
+  - Pagination: Implements a 50-item limit per request to prevent DoS via large
+    database scans.
+*/
 func OutboxHandler(w http.ResponseWriter, r *http.Request) {
 	// Outbox retrieval is always a GET request.
 	if r.Method != http.MethodGet {
@@ -662,8 +702,19 @@ func RateLimitsHandler(w http.ResponseWriter, r *http.Request) {
 // PROTOCOL HANDSHAKE: MUTUAL TRUST ESTABLISHMENT
 // ============================================================================
 
-// HandshakeHandler processes an "Inbound" handshake request.
-// It stores the remote server's credentials and returns its own for mutual trust.
+/*
+HandshakeHandler manages the manual trust-establishment ritual between nodes.
+Unlike opportunistic discovery, a Handshake is an explicit registration process.
+
+Workflow:
+ 1. Remote Identification: The peer sends its ServerID, PublicKey, and Inbox endpoint.
+ 2. Local Storage: This data is Upserted into the trusted_servers table.
+ 3. Mutual Exchange: Upon success, the local node returns its own Identity and
+    Public Key, allowing the remote node to also trust us.
+
+This mutual exchange is typically triggered by an administrator using the
+InitiateHandshakeHandler or command-line tools.
+*/
 func HandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		sendError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Only POST allowed", "")

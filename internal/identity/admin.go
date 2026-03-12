@@ -137,6 +137,18 @@ func ValidateAdminCredentials(username, password string) bool {
 
 // GenerateJWT creates a new authentication token for an administrator.
 // It signs the token using a secret key defined in the system's environment variables.
+/*
+JWT Lifecycle & Security Policy:
+1.  Entropy Source: The 'JWT_SECRET' environment variable must be a high-entropy
+    string. If empty, the system refuses to sign tokens to prevent insecure defaults.
+2.  Claim Structure:
+    - Username: Used for audit logging of administrative actions.
+    - IsAdmin: Hardcoded to true; used for rapid authorization checks.
+    - Expiration: Set to 24 hours. This provides a balance between user
+      convenience and the risk of token theft.
+3.  Algorithm: Uses HS256 (HMAC with SHA-256). For multi-node environments,
+    this requires all nodes to share the same secret key.
+*/
 func GenerateJWT(username string) (string, error) {
 	// Retrieve the secret key. If missing, we cannot sign tokens, which is a fatal error.
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -201,6 +213,15 @@ func ValidateJWT(tokenString string) (*AdminClaims, error) {
 
 // GetServerConfig fetches the server's identity settings from the database.
 // It handles initialization logic by falling back to environment variables if no DB record exists.
+/*
+Node Identity Resolution:
+In a federated network, every node must have a consistent identity.
+This function uses a tiered lookup approach:
+- Level 1: Database ('server_config' table). This represents the current
+  truth as modified by administrators via the web dashboard.
+- Level 2: Environment Variables ('SERVER_NAME'). Used if the DB is uninitialized.
+- Level 3: Static Defaults ('localhost'). Used as a last resort.
+*/
 func GetServerConfig() (*ServerConfig, error) {
 	var config ServerConfig
 
@@ -291,6 +312,14 @@ func SeedServerConfig() {
 
 // UpdateServerName allows an administrator to rename the server instance.
 // This triggers a global notification to inform all users of the change.
+/*
+Administrative Side-Effects:
+When a server name changes, we must inform the user base for transparency.
+1. Persistence: Update the 'server_config' table with the new name.
+2. Async Notification: Launch a goroutine to broadcast the news to all users.
+   We use a separate thread so that the admin's PATCH request returns instantly
+   even if the system has thousands of users to notify.
+*/
 func UpdateServerName(newName, updatedBy string) error {
 	// Perform the database update.
 	_, err := db.Exec(`
@@ -498,6 +527,13 @@ func GetSuggestedUsers(limit int) ([]models.UserDocument, error) {
 
 // TestDatabaseConnection verifies that a potential migration target is valid and reachable.
 // This is used as a pre-flight check before starting expensive data movement.
+/*
+Pre-Migration Validation:
+Before committing to a migration, we perform a "Smoke Test" on the target DB.
+- open: Verify the DSN format is correct.
+- ping: Verify network connectivity and user permissions on the remote Postgres.
+Failure here prevents the user from starting a migration that would inevitably fail.
+*/
 func TestDatabaseConnection(connectionString string) error {
 	testDB, err := sql.Open("postgres", connectionString)
 	if err != nil {
@@ -689,6 +725,17 @@ func CreateSchemaOnNewDB(newDB *sql.DB) error {
 
 // MigrateDatabase is the entry point for the migration process.
 // It logs the request and hands off the actual work to a background worker.
+/*
+Database Migration Paradigm:
+FediNet supports dynamic scaling where an administrator can move data to
+a larger or dedicated DB instance without manual SQL exports.
+
+Migration Strategy:
+1. Snapshotting: Record the 'pending' status in the local DB for UI tracking.
+2. Non-Blocking: The heavy lifting is done in `performMigration` via a goroutine.
+3. UUID Tracking: Every migration session is assigned a UUID return to the admin
+   immediately for polling status updates.
+*/
 func MigrateDatabase(newConnectionString string) (string, error) {
 	// Generate a unique ID to identify this specific migration task.
 	migrationID := uuid.New().String()

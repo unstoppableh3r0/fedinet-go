@@ -16,9 +16,22 @@ import (
 // SOCIAL GRAPH ENGINE: FOLLOWS & UNFOLLOWS
 // ============================================================================
 
-// FollowUser establishes a unidirectional relationship between two entities.
-// This function implements "Smart Discovery": it detects if the target user
-// exists on the local instance or a remote federated instance.
+/*
+FollowUser implements the bidirectional trust established between identities.
+In a federated context, a "Follow" is more than a database row; it is a
+cryptographically signed request that must be synchronized across nodes.
+
+Relationship Types:
+  - Peer-to-Peer (Local): Both users reside on this instance.
+  - Federated (Remote): The followee is on a remote server. This triggers an
+    outbound ActivityPub delivery.
+
+Scalability Considerations:
+  - Fan-out: Federated follows are delivered asynchronously to prevent blocking
+    the local user's web request.
+  - Cache Invalidation: The system uses a proactive invalidation strategy to
+    ensure follower counts remain accurate on the frontend.
+*/
 func FollowUser(followerID, followeeID string) error {
 	localEndpoint := getLocalEndpoint()
 
@@ -165,6 +178,17 @@ func UpdateBio(userID, newBio string) error {
 
 // LogActivity acts as the "Outbox Producer". It pushes data into outbox_activities
 // where background workers will eventually pick it up for delivery to remote servers.
+/*
+Asynchronous Activity Pipeline:
+FediNet uses a "Write-Ahead Outbox" pattern to ensure delivery reliability.
+1. Production: When a user likes, follows, or posts, `LogActivity` creates a
+   record in the 'outbox_activities' table with status='pending'.
+2. Selection: A persistent background worker (delivery engine) polls this table.
+3. Transmission: The worker signs the payload and attempts an HTTP POST to the
+   target server's inbox.
+4. Retention: Successful deliveries are marked 'delivered'. Failed ones enter
+   the exponential backoff retry loop.
+*/
 func LogActivity(actorID, verb, objectType, objectID, targetID, payload string) error {
 	if payload == "" {
 		payload = "{}"
@@ -187,8 +211,6 @@ func LogActivity(actorID, verb, objectType, objectID, targetID, payload string) 
 // ============================================================================
 // IDENTITY & ACCOUNT MANAGEMENT
 // ============================================================================
-
-
 
 // GetProfileByUserID retrieves a full Profile model including aggregated counts.
 func GetProfileByUserID(userID string) (*models.Profile, error) {
@@ -254,6 +276,17 @@ func GetProfileByUserID(userID string) (*models.Profile, error) {
 
 // CreateAccount implements the "Identity Protocol" for new users.
 // It generates RSA/ED25519 keys, an encrypted private key store, and a DID.
+/*
+Account Provisioning Workflow:
+Creating a FediNet identity is a heavy-duty cryptographic process.
+1. Keypair Creation: Every user gets a unique Ed25519 key for signing activities.
+2. At-Rest Encryption: The private key is encrypted with a server-wide master key.
+   Even with DB access, an attacker cannot sign activities on behalf of the user.
+3. Recovery Assets: Generates a human-readable recovery phrase (mnemonic) that
+   allows users to regain access if they forget their password.
+4. Profile Shadowing: Automatically initializes a blank Profile record to prevent
+   null-pointer issues during first-login.
+*/
 func CreateAccount(userID, homeServer, passwordHash string) (string, error) {
 	// 1. INPUT VALIDATION
 	if !ValidateUserID(userID) {
@@ -457,6 +490,13 @@ func propagateProfileUpdate(userID string, req models.UpdateProfileRequest) erro
 // ============================================================================
 
 // CreatePost generates a new status update or media-rich post.
+/*
+Content Creation Policy:
+- Visibility: Supports 'public', 'private', and 'federated' scoping.
+- Media Handling: Stores image/video URLs while preserving the original aspect ratios.
+- Fallback: Enforces at least one character of content to satisfy Postgres
+  constraints, though pure-media posts are supported via space-sentinels.
+*/
 func CreatePost(userID, content string, imageURL *string, visibility string) (string, error) {
 	// Allow image-only posts by using a space sentinel when content is empty.
 	if content == "" {
@@ -555,6 +595,14 @@ func ToggleRepost(userID, postID string) error {
 }
 
 // CreateReply generates a threaded response to an existing post.
+/*
+Threaded Communication Engine:
+Replies are recursively linked via the 'parent_id' column.
+- Single-Level: A direct response to a post.
+- Multi-Level: A response to another response.
+- Notification Fan-out: The system detects the original author and the parent-reply
+  author to ensure everyone in the conversation is alerted when a new branch is added.
+*/
 func CreateReply(userID, postID, content string, parentID *string) (string, error) {
 	var replyID string
 	err := db.QueryRow(`

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -261,15 +262,27 @@ func getServerEndpoint() string {
 }
 
 func getServerPublicKey() string {
-	// Get public key from the identity private key
+	// 1. Try fetching the Base64 public key from the database first
+	var publicKeyB64 string
+	err := db.QueryRow("SELECT public_key FROM server_identity WHERE id = 1").Scan(&publicKeyB64)
+	if err == nil && publicKeyB64 != "" {
+		pubBytes, decodeErr := base64.StdEncoding.DecodeString(publicKeyB64)
+		if decodeErr == nil && len(pubBytes) == ed25519.PublicKeySize {
+			return hex.EncodeToString(pubBytes)
+		}
+	}
+
+	// 2. Fall back to the environment variable
 	privKeyHex := os.Getenv("SERVER_IDENTITY_PRIVATE_KEY")
 	if privKeyHex == "" {
-		log.Fatal("SERVER_IDENTITY_PRIVATE_KEY not set")
+		log.Printf("ERROR: SERVER_IDENTITY_PRIVATE_KEY not set and DB query failed")
+		return ""
 	}
 
 	privKeyBytes, err := hex.DecodeString(privKeyHex)
-	if err != nil {
-		log.Fatal("Invalid SERVER_IDENTITY_PRIVATE_KEY format")
+	if err != nil || len(privKeyBytes) != ed25519.PrivateKeySize {
+		log.Printf("ERROR: Invalid SERVER_IDENTITY_PRIVATE_KEY format or length")
+		return ""
 	}
 
 	privateKey := ed25519.PrivateKey(privKeyBytes)

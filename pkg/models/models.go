@@ -6,6 +6,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// Visibility defines the scope of content accessibility within the network.
+/*
+Visibility Scoping Policy:
+- public: Default. Content is accessible to everyone and federated globally.
+- followers: Restricted to users who have an active Follow relationship.
+- private: Local-only. Content does not leave the originating server.
+- server: Restricted to users residing on the same physical node.
+*/
 type Visibility string
 
 const (
@@ -15,6 +23,16 @@ const (
 	VisibilityServer    Visibility = "server"
 )
 
+/*
+Identity represents a user's globally unique cryptographic presence.
+This model is the foundation of the 'Self-Sovereign Identity' (SSI) pattern.
+
+Attributes:
+- DID: Decentralized Identifier (e.g., did:fedinet:hash).
+- PublicKey: Used by remote servers to verify the authenticity of user activities.
+- PrivateKey: Encrypted at-rest. Used by the local node to sign outbound data.
+- RecoveryKeyHash: A fallback mechanism for identity recovery in case of credential loss.
+*/
 type Identity struct {
 	ID             uuid.UUID `json:"id"`
 	DID            string    `json:"did,omitempty"`
@@ -78,6 +96,16 @@ type BlockUserRequest struct {
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 }
 
+/*
+Profile contains mutable metadata about a user.
+Unlike Identity, which is mostly static and cryptographic, the Profile is
+designed for high-frequency updates and social display.
+
+Features:
+  - Count Caching: FollowersCount and FollowingCount are optionally returned to
+    minimize database join costs during feed generation.
+  - Visibility Toggles: Allows users to hide their social graph from public view.
+*/
 type Profile struct {
 	UserID              string     `json:"user_id"`
 	DisplayName         string     `json:"display_name"`
@@ -186,6 +214,14 @@ const (
 	VisibilityMutuals VisibilityLevel = "mutuals"
 )
 
+/*
+Post represents a user-generated status, image, or article.
+This is the primary atomic unit of content in the FediNet ecosystem.
+
+Attributes:
+- HasLiked/HasReposted: Injected booleans relative to the requesting 'viewer'.
+- Engagement Metrics: Denormalized counts (LikeCount, ReplyCount) for performance.
+*/
 type Post struct {
 	ID        string    `json:"id"`
 	Author    string    `json:"author"`
@@ -393,6 +429,15 @@ type RetryConfig struct {
 	ExpirationTime time.Duration `json:"expiration_time"`
 }
 
+/*
+InboxActivity represents an event arriving from a remote node.
+It serves as the persistence layer for the incoming ActivityPub stream.
+
+States (Status):
+- received: Stored but not yet processed.
+- processed: Business logic (like creating a follow row) complete.
+- failed: Processing error documented in 'error_message'.
+*/
 type InboxActivity struct {
 	ID           uuid.UUID  `json:"id"`
 	ActivityType string     `json:"activity_type"`
@@ -423,6 +468,10 @@ type OutboxActivity struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+/*
+InboxRequest is the wire-format model for incoming Activities.
+It maps strictly to the ActivityPub/Fedinet JSON schema for external delivery.
+*/
 type InboxRequest struct {
 	ActivityType string                 `json:"activity_type"`
 	Actor        string                 `json:"actor"`

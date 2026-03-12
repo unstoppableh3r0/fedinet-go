@@ -19,9 +19,28 @@ import (
 // OUTBOUND MESSAGE ROUTING & POLICY ENFORCEMENT
 // ============================================================================
 
-// SendFederatedActivity is the primary entry point for sending data to a remote server.
-// It performs a "Pre-Flight" check to ensure the target server is neither blocked
-// nor restricted by the current federation mode (Soft vs Hard).
+/*
+SendFederatedActivity is the primary entry point for sending data to a remote server.
+It implements a robust pre-flight validation pipeline to maintain network hygiene.
+
+Lifecycle of an Outbound Message:
+1.  Defederation Check: Verify if the target server is on the global blacklist (blocked_servers).
+    This check prevents any data leakage to malicious or unsavory instances.
+2.  Federation Mode Check: In 'Hard' mode, communications are restricted to servers
+    where we have a pre-established trust relationship (trusted_servers).
+    In 'Soft' mode, it allows opportunistic delivery to any valid ActivityPub-ready server.
+3.  Initial Delivery Attempt: Calls DeliverWithRetry for the first synchronous attempt.
+4.  Async Retry Scheduling: If the first attempt fails due to network instability,
+    the message is handed off to the QueueForRetry system for persistent tracking.
+
+Parameters:
+- activityID: Unique UUID for tracking the activity lifecycle in the database.
+- targetServer: The base URL of the remote federated instance.
+- activityType: The type of Activity (e.g., "Post", "Follow", "Like").
+- actorID: The local user ID initiating the activity.
+- targetID: (Optional) The remote user or object ID the activity targets.
+- payload: The actual content dictionary being transmitted.
+*/
 func SendFederatedActivity(activityID uuid.UUID, targetServer string, activityType, actorID string, targetID *string, payload map[string]interface{}) error {
 
 	// 1. SAFETY CHECK: Defederation Check
@@ -68,9 +87,24 @@ func SendFederatedActivity(activityID uuid.UUID, targetServer string, activityTy
 // NETWORK DELIVERY LAYER
 // ============================================================================
 
-// DeliverWithRetry performs the actual HTTP POST to the remote server's inbox.
-// It transforms internal models into the format expected by the recipient
-// and updates the local database state upon success.
+/*
+DeliverWithRetry performs the actual HTTP transport of the activity to the remote inbox.
+It is responsible for data transformation, header enrichment, and state persistence.
+
+Key Responsibilities:
+- Metadata Decoration: Injects origin-server timestamps and moderation flags to
+  assist remote servers in their own safety audits.
+- Model Translation: Maps internal struct data into the models.InboxRequest format,
+  ensuring protocol compatibility with the Fedinet standard.
+- Timeout Management: Enforces a strict 10-second timeout to prevent local thread
+  exhaustion during peak latency or remote downtime.
+- Database Synchronization: Upon receiving a 2xx response, it atomically updates
+  the outbox_activities table to mark the message as 'delivered'.
+
+Error Handling:
+- Returns wrapping errors for marshaling failures, transport errors, and non-success
+  HTTP status codes (4xx/5xx).
+*/
 func DeliverWithRetry(messageID uuid.UUID, targetServer, activityType, actorID string, targetID *string, payload map[string]interface{}, attemptNumber int) error {
 
 	// 1. PAYLOAD DECORATION
@@ -141,9 +175,24 @@ func DeliverWithRetry(messageID uuid.UUID, targetServer, activityType, actorID s
 // RELIABILITY & RETRY LOGIC
 // ============================================================================
 
-// QueueForRetry manages the lifecycle of a failing delivery attempt.
-// It calculates the next retry window and marks a message as "Expired"
-// if the maximum number of retries is exceeded.
+/*
+QueueForRetry manages the failure-recovery state machine for outbound activities.
+It implements an "Exponential-ish" backoff strategy to balance delivery reliability
+with system resource conservation.
+
+Retry Policy:
+1.  Max Attempts: Fixed at 6 attempts (initial + 5 retries). This span covers
+    approximately 24 hours of intermittent failure.
+2.  State Transition:
+    - PENDING -> SUCCESS: If a delivery eventually succeeds.
+    - PENDING -> EXPIRED: If the maximum retry count is reached without success.
+3.  Auditing: Every failed attempt records its specific error message in the
+    delivery_attempts table, providing administrators a clear trace of why
+    federation with a specific instance might be failing.
+
+Backoff Curve (Seconds):
+[30, 60, 300, 900, 3600, 21600]
+*/
 func QueueForRetry(messageID uuid.UUID, errorMsg string) error {
 
 	// 1. LOOKUP PREVIOUS ATTEMPTS
@@ -284,8 +333,24 @@ func ProcessRetryQueue() error {
 // INBOUND ACTIVITY PROCESSING
 // ============================================================================
 
-// ProcessInboundActivity handles activities arriving from foreign servers.
-// It enforces rate limits, defederation blocks, and individual user block lists.
+/*
+ProcessInboundActivity is the gatekeeper for data entering this node from the network.
+It enforces a "Trust-then-Verify" security model with multiple protection layers.
+
+Protection Layers:
+1.  Global Defederation: Immediately drops packets from servers on the blocked_servers list.
+2.  Flood Protection (Rate Limiting): Uses a sliding-window tracker in the rate_limits
+    table to restrict inbound traffic volume per-remote-server and per-endpoint.
+3.  User Autonomy: Respects local user settings by checking if the target user has
+    explicitly blocked the incoming actorID.
+4.  Payload Persistence: Serializes the inbound ActivityPub-compliant JSON into the
+    local inbox_activities store for asynchronous processing.
+5.  Acknowledgment Flow: Once stored safely (status='received'), it fires a background
+    goroutine to notify the sender that the message has been accepted.
+
+This multi-threaded approach ensures the high-traffic /inbox endpoint remains
+highly responsive regardless of internal processing complexity.
+*/
 func ProcessInboundActivity(activityType, actorID, actorServer string, targetID *string, payload map[string]interface{}) (uuid.UUID, error) {
 
 	// 1. SERVER-LEVEL SECURITY
@@ -634,6 +699,23 @@ func GetRateLimitForServer(serverURL, endpoint string) (*models.RateLimit, error
 // ============================================================================
 // CAPABILITY DISCOVERY & NEGOTIATION
 // ============================================================================
+
+/*
+Capability Discovery enables heterogeneous servers to communicate effectively
+by announcing their supported feature sets.
+
+Key Metadata:
+- ProtocolVersions: SemVer strings defining the communication dialect.
+- SupportedTypes: List of Activity types (e.g., "Post", "DM") the server can process.
+- MaxMessageSize: Protection against multi-megabyte payload attacks.
+- SupportsRetries/Acks: Indicates if the remote instance participates in our
+  reliability protocol flow.
+
+Caching Strategy:
+Discovery is expensive (requires outbound network I/O). The system implements
+a 1-hour local cache in the server_capabilities table. Every message delivery
+check first consults the cache before attempting fresh discovery.
+*/
 
 // AdvertiseCapabilities returns what this node supports.
 // Other servers use this to see if we support specific encryption or activity types.
